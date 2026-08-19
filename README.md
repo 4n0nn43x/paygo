@@ -10,12 +10,15 @@
 
 | Path | Chain | What |
 |---|---|---|
-| `contracts/PayGoRouter.sol` | Sepolia | stateless: `transferFrom` + `InstallmentPaid` event |
-| `contracts/PayGoEscrow.sol` | Creditcoin | orders, `settle` (1..10 proofs, one continuity proof), `declareDefault` / `finalizeDefault`, passport counters |
+| `contracts/PayGoRouter.sol` | Sepolia | stateless, 3 ways in — `payInstallment`, `payWithPermit` (EIP-2612), `payWithAuthorization` (EIP-3009 autopay) — one `InstallmentPaid` event out |
+| `contracts/PayGoEscrow.sol` | Creditcoin | orders, `settle` (1..10 proofs, one continuity proof), `declareDefault` / `finalizeDefault`; deposit sized by the buyer's passport (40 % → 15 %) |
+| `contracts/CreditPassport.sol` | Creditcoin | ERC-5192 soulbound record of payment facts, written and read back by the escrow |
 | `contracts/Attestcoin.sol` | — | precompile interfaces 0x…0FD2 (BlockProver) / 0x…0fD3 (ChainInfo) |
-| `contracts/Demo.sol` | — | `TestUSDC`, `DemoAsset` for the demo |
-| `test/` | — | 5 security checks + state machine, precompiles mocked with `vm.etch` |
-| `worker/settle.ts` | — | convenience relayer: listen → wait attested → batch proof → `settle` |
+| `contracts/Demo.sol` | — | `TestUSDC` (permit + EIP-3009), `DemoAsset` |
+| `test/` | — | 22 tests: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture |
+| `worker/settle.ts` | — | convenience relayer: autopay pre-signed authorizations + listen → wait attested → batch proof → `settle`; serves the checkout UI |
+| `web/index.html` | — | single-page checkout: seller listing, 1-click deposit, sign-once autopay, live tracker, passport |
+| `docs/` | — | `DEMO.md` (3-act stage script), `SUBMISSION.md` (technical submission), `AUDIT.md` |
 
 ## Run
 
