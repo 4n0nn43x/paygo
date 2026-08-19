@@ -1,0 +1,24 @@
+{
+  "name": "paygo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "PayGo — trustless cross-chain hire-purchase on Creditcoin (BUIDL CTC 2026 Fall)",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test",
+    "worker": "tsx worker/settle.ts"
+  },
+  "dependencies": {
+    "@gluwa/usc-contracts": "0.1.2",
+    "@gluwa/usc-sdk": "0.18.0",
+    "@openzeppelin/contracts": "5.4.0",
+    "dotenv": "17.4.2",
+    "ethers": "^6.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "forge-std": "github:foundry-rs/forge-std",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.0"
+  }
+}
