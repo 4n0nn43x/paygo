@@ -115,14 +115,36 @@ createServer((req, res) => {
     pending: state.pending, autopay: state.autopay, settles: state.settles, done: state.done.length,
   });
   if (req.method === 'POST' && req.url === '/authorizations') {
-    let body = ''; req.on('data', c => body += c).on('end', () => {
-      try { const list: Auth[] = JSON.parse(body); state.autopay.push(...list); save(); json(200, { accepted: list.length }); }
-      catch (e: any) { json(400, { error: e.message }); }
+    let body = ''; let tooBig = false;
+    req.on('data', c => { body += c; if (body.length > 64_000) { tooBig = true; req.destroy(); } });
+    req.on('end', () => {
+      if (tooBig) return json(413, { error: 'too large' });
+      try {
+        const raw = JSON.parse(body);
+        if (!Array.isArray(raw) || raw.length > 64) return json(400, { error: 'expected an array of <=64 authorizations' });
+        const isAddr = (x: unknown) => typeof x === 'string' && /^0x[0-9a-fA-F]{40}$/.test(x);
+        const isHex = (x: unknown, n: number) => typeof x === 'string' && new RegExp(`^0x[0-9a-fA-F]{${n}}$`).test(x);
+        const clean: Auth[] = [];
+        for (const a of raw) {
+          if (!(isAddr(a.token) && isAddr(a.payee) && isAddr(a.from) && isHex(a.r, 64) && isHex(a.s, 64)
+            && Number.isInteger(a.installmentNo) && a.installmentNo >= 0 && a.installmentNo < 64
+            && Number.isInteger(a.v) && Number.isInteger(a.validAfter) && Number.isInteger(a.validBefore)
+            && /^[0-9]+$/.test(String(a.orderId)) && /^[0-9]+$/.test(String(a.amount)))) return json(400, { error: 'invalid authorization' });
+          const key = `${a.orderId}:${a.installmentNo}:${a.from.toLowerCase()}`;
+          if (state.autopay.some(x => `${x.orderId}:${x.installmentNo}:${x.from.toLowerCase()}` === key)) continue;   // dedup
+          clean.push({ orderId: String(a.orderId), installmentNo: a.installmentNo, token: a.token, payee: a.payee,
+            amount: String(a.amount), from: a.from, validAfter: a.validAfter, validBefore: a.validBefore, v: a.v, r: a.r, s: a.s });
+        }
+        if (state.autopay.length + clean.length > 1000) return json(429, { error: 'autopay queue full' });
+        state.autopay.push(...clean); save(); json(200, { accepted: clean.length });
+      } catch (e: any) { json(400, { error: e.message }); }
     });
     return;
   }
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-    res.writeHead(200, { 'content-type': 'text/html' }); return res.end(readFileSync('web/index.html'));
+    res.writeHead(200, { 'content-type': 'text/html', 'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src https://api.qrserver.com; style-src 'unsafe-inline'" });
+    return res.end(readFileSync('web/index.html'));
   }
   res.writeHead(404); res.end();
 }).listen(PORT, () => console.log(`checkout UI + API on http://localhost:${PORT}`));

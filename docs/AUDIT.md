@@ -47,3 +47,29 @@ present and tested; batch nullifiers roll back on revert; state machine has no r
 state; `declareDefault` targets the earliest unpaid installment on the attested clock with grace >
 attestation latency; `uint8`/installment bounds; `createOrder` split conserves `price`; EIP-3009 replay
 and domain binding on the token; passport soulbound; the two clocks are not conflated.
+
+---
+
+# Web checkout review (web-audit skill)
+
+Run on `web/index.html` + the worker's HTTP handler. The signing flow was verified **correct** end to
+end (autopay nonce matches `PayGoRouter.authNonce` byte-for-byte; EIP-712 domain and Permit /
+ReceiveWithAuthorization types match `TestUSDC`; CC3 chainId hex `0x18e8f` correct; the HIGH-1 payee
+binding holds; the relayer never burns gas on junk — a bad authorization reverts at `estimateGas` and is
+never sent; no secret exposure). Findings, all fixed:
+
+## WEB-1 — Stored XSS via `/authorizations` → `/state` → worker log — **FIXED**
+`POST /authorizations` stored the body verbatim, `GET /state` echoed it, and `refreshWorker` rendered it
+with `innerHTML`; `orderId`/`installmentNo` are attacker-controlled, and the endpoint is CSRF-reachable
+(text/plain simple request). Payload executed in the wallet-connected origin.
+**Fix**: the worker log is now built with `textContent` (`replaceChildren`), never `innerHTML`; and the
+POST handler validates every field (addresses, hex, integer ranges, numeric strings) and rejects
+anything malformed. A served CSP (`default-src 'none'`, pinned script/connect/img) is the backstop.
+
+## WEB-2 — Unbounded `/authorizations` DoS — **FIXED**
+No cap, no dedup, whole-file rewrite per POST. **Fix**: 64 KB body limit, ≤64 per request, queue capped
+at 1000, dedup on `(orderId, installmentNo, from)`.
+
+## WEB-3 — No SRI / no CSP — **FIXED**
+`integrity="sha384-…"` + `crossorigin` on the ethers CDN tag; CSP header on the served page pinning
+script to cdnjs, connect to the two RPCs, img to the QR host.

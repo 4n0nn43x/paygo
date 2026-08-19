@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PayGo — pay in installments, trustlessly</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js" integrity="sha384-6Zl0Pc8zjSz8KvmNeXRvUQgY4ryFb+BwDvKCmLYcBME0joAaru491tQgi9B7zsMM" crossorigin="anonymous"></script>
 <style>
 :root{--bg:#0f1115;--card:#171a21;--line:#2a2f3a;--fg:#e8eaf0;--mut:#9aa3b2;--ok:#3ddc84;--warn:#ffb020;--bad:#ff5c5c;--acc:#6ea8fe}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
@@ -116,6 +116,6 @@ $('#p-load').onclick=async()=>{const esc=new E.Contract(cfg.escrow,ESCROW_ABI,cc
 async function refreshWorker(){try{const s=await (await fetch('/state')).json();const b=$('#log-body');const lines=[];
  for(const a of s.autopay)lines.push(`autopay order ${a.orderId} #${a.installmentNo} ${a.txHash?'paid '+a.txHash:a.error?'failed: '+a.error:'due at '+new Date(a.validAfter*1000).toLocaleTimeString()}`);
  for(const p of s.pending)lines.push(`pending proof for ${p.hash} (Sepolia ${p.height})`);for(const t of s.settles)lines.push(`settled ${t.count} installment(s) in ${t.tx} — ${t.gas} gas (${Math.round(t.gas/t.count)} each)`);
- b.innerHTML=lines.reverse().map(l=>`<div>${l}</div>`).join('')||'<div class=mut>idle</div>'}catch{}}
+ b.replaceChildren(...(lines.length?lines.reverse():['idle']).map(l=>{const d=document.createElement('div');d.textContent=l;return d}))}catch{}}
 init();
 </script></body></html>
