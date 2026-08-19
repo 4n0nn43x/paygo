@@ -11,14 +11,14 @@ CURE=${CURE:-240}                             # Creditcoin blocks (~1h) to prove
 addr() { grep -o 'Deployed to: 0x[0-9a-fA-F]*' | cut -d' ' -f3; }
 
 echo "# Sepolia"
-ROUTER=$(forge create --broadcast --rpc-url "$SOURCE_CHAIN_RPC_URL" --private-key "$PK" contracts/PayGoRouter.sol:PayGoRouter | addr)
-USDC=$(forge create --broadcast --rpc-url "$SOURCE_CHAIN_RPC_URL" --private-key "$PK" contracts/Demo.sol:TestUSDC | addr)
+ROUTER=$(forge create --broadcast --rpc-url "$SOURCE_CHAIN_RPC_URL" --private-key "$PK" contracts/PayGoRouter.sol:PayGoRouter 2>/dev/null | addr)
+USDC=$(forge create --broadcast --rpc-url "$SOURCE_CHAIN_RPC_URL" --private-key "$PK" contracts/Demo.sol:TestUSDC 2>/dev/null | addr)
 echo "ROUTER_ADDRESS=$ROUTER"
 echo "USDC_ADDRESS=$USDC"
 
 echo "# Creditcoin (EvmV1Decoder linked at the testnet library address — forgetting --libraries is deploy trap #1)"
 ESCROW=$(forge create --broadcast --rpc-url "$CREDITCOIN_RPC_URL" --private-key "$PK" --libraries "$DECODER" \
-  contracts/PayGoEscrow.sol:PayGoEscrow --constructor-args "$SOURCE_CHAIN_KEY" "$ROUTER" "$GRACE" "$CURE" | addr)
-ASSET=$(forge create --broadcast --rpc-url "$CREDITCOIN_RPC_URL" --private-key "$PK" contracts/Demo.sol:DemoAsset | addr)
+  contracts/PayGoEscrow.sol:PayGoEscrow --constructor-args "$SOURCE_CHAIN_KEY" "$ROUTER" "$GRACE" "$CURE" 2>/dev/null | addr)
+ASSET=$(forge create --broadcast --rpc-url "$CREDITCOIN_RPC_URL" --private-key "$PK" contracts/Demo.sol:DemoAsset 2>/dev/null | addr)
 echo "ESCROW_ADDRESS=$ESCROW"
 echo "ASSET_ADDRESS=$ASSET"

@@ -17,25 +17,25 @@ EPOCH=1000
 case "${1:-}" in
 order)
   ID=$(cast call $ASSET_ADDRESS "next()(uint256)" --rpc-url $CREDITCOIN_RPC_URL)
-  cast send $ASSET_ADDRESS "mint(address)" $ME $CC >/dev/null
-  cast send $ASSET_ADDRESS "approve(address,uint256)" $ESCROW_ADDRESS $ID $CC >/dev/null
+  cast send $ASSET_ADDRESS "mint(address)" $ME $CC >/dev/null 2>&1
+  cast send $ASSET_ADDRESS "approve(address,uint256)" $ESCROW_ADDRESS $ID $CC >/dev/null 2>&1
   # first deadline = next epoch boundary at least 2 epochs ahead of the current Sepolia head
   HEAD=$(cast block-number --rpc-url $SOURCE_CHAIN_RPC_URL)
   FIRST=$(( (HEAD / EPOCH + 2) * EPOCH ))
   AMOUNTS="[40000000,20000000,20000000,20000000]"   # 40 + 3×20 tUSDC (6 decimals)
   cast send $ESCROW_ADDRESS "createOrder(address,address,uint256,address,address,uint256[],uint64,uint64)" \
-    $BUYER $ASSET_ADDRESS $ID $ME $USDC_ADDRESS "$AMOUNTS" $FIRST $EPOCH $CC >/dev/null
+    $BUYER $ASSET_ADDRESS $ID $ME $USDC_ADDRESS "$AMOUNTS" $FIRST $EPOCH $CC >/dev/null 2>&1
   OID=$(( $(cast call $ESCROW_ADDRESS "nextOrderId()(uint256)" --rpc-url $CREDITCOIN_RPC_URL) - 1 ))
   echo "order $OID: asset #$ID escrowed, buyer $BUYER, deadlines $FIRST +k×$EPOCH (Sepolia height)";;
 pay)
   OID=$2; N=$3
   AMT=$(cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint256[]))" $OID --rpc-url $CREDITCOIN_RPC_URL | tr -d '[]() ' | cut -d, -f$((14 + N)))
-  cast send $USDC_ADDRESS "mint(address,uint256)" $ME $AMT $SEP >/dev/null
-  cast send $USDC_ADDRESS "approve(address,uint256)" $ROUTER_ADDRESS $AMT $SEP >/dev/null
-  TX=$(cast send $ROUTER_ADDRESS "payInstallment(address,uint256,uint8,address,address,uint256)" $ESCROW_ADDRESS $OID $N $USDC_ADDRESS $ME $AMT $SEP --json | grep -o '"transactionHash":"0x[0-9a-f]*"' | cut -d'"' -f4)
+  cast send $USDC_ADDRESS "mint(address,uint256)" $ME $AMT $SEP >/dev/null 2>&1
+  cast send $USDC_ADDRESS "approve(address,uint256)" $ROUTER_ADDRESS $AMT $SEP >/dev/null 2>&1
+  TX=$(cast send $ROUTER_ADDRESS "payInstallment(address,uint256,uint8,address,address,uint256)" $ESCROW_ADDRESS $OID $N $USDC_ADDRESS $ME $AMT $SEP --json 2>/dev/null | grep -o '"transactionHash":"0x[0-9a-f]*"' | cut -d'"' -f4 | head -1)
   echo "paid installment $N of order $OID on Sepolia: $TX  (the worker will prove & settle it)";;
-default)  cast send $ESCROW_ADDRESS "declareDefault(uint256)" $2 $CC | grep -E "status|transactionHash";;
-finalize) cast send $ESCROW_ADDRESS "finalizeDefault(uint256)" $2 $CC | grep -E "status|transactionHash";;
+default)  cast send $ESCROW_ADDRESS "declareDefault(uint256)" $2 $CC 2>/dev/null | grep -E "status|transactionHash";;
+finalize) cast send $ESCROW_ADDRESS "finalizeDefault(uint256)" $2 $CC 2>/dev/null | grep -E "status|transactionHash";;
 show)     cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint256[]))" $2 --rpc-url $CREDITCOIN_RPC_URL;;
 *) sed -n 2,8p "$0";;
 esac
