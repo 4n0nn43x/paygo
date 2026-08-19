@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PayGo — pay in installments, trustlessly</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--line:#2a2f3a;--fg:#e8eaf0;--mut:#9aa3b2;--ok:#3ddc84;--warn:#ffb020;--bad:#ff5c5c;--acc:#6ea8fe}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+header{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0}h1 small{color:var(--mut);font-weight:400;margin-left:8px}
+main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+h2{font-size:15px;margin:0 0 10px;color:var(--acc)}
+label{display:block;color:var(--mut);font-size:12px;margin-top:8px}input,select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0c0e12;color:var(--fg)}
+button{margin-top:10px;padding:9px 14px;border-radius:8px;border:0;background:var(--acc);color:#081020;font-weight:600;cursor:pointer}button.sec{background:#2a2f3a;color:var(--fg)}button:disabled{opacity:.5}
+.mono{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+#log{grid-column:1/-1;max-height:220px;overflow:auto}#log div{padding:2px 0;border-bottom:1px dashed var(--line)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#2a2f3a}
+</style></head><body>
+<header><h1>PayGo <small>buy now, pay in installments — escrow on Creditcoin, payments on Ethereum, every payment proven by Attestcoin</small></h1>
+<span style="margin-left:auto"><button id="connect" class="sec">Connect wallet</button> <span id="who" class="mono mut"></span></span></header>
+<main>
+<section><h2>1 · Seller — list an asset</h2>
+<div class="mut">Creditcoin CC3. Mint a demo asset, escrow it with a price and a schedule. The buyer's deposit is sized by their passport (40 % → 15 %).</div>
+<label>Buyer address</label><input id="s-buyer" placeholder="0x… (defaults to you)">
+<label>Price (tUSDC)</label><input id="s-price" value="100">
+<label>Installments</label><input id="s-n" value="4">
+<label>Interval (Sepolia blocks, multiple of 1000)</label><input id="s-int" value="1000">
+<button id="s-create">Mint demo asset & create order</button>
+<div id="s-out" class="mono"></div></section>
+
+<section><h2>2 · Buyer — checkout</h2>
+<div class="mut">Ethereum Sepolia. Pay the deposit in one click (permit), then <b>sign once</b> for the rest: authorizations are submitted by anyone when due (EIP-3009).</div>
+<label>Order id</label><input id="b-id" value="1">
+<button id="b-load" class="sec">Load order</button>
+<div id="b-sched"></div>
+<label>Autopay: seconds between installments (demo; production = aligned on deadlines)</label><input id="b-gap" value="90">
+<button id="b-deposit">Pay deposit now (permit, 1 tx)</button>
+<button id="b-autopay">Sign once → autopay the rest</button>
+<div id="b-out" class="mono"></div></section>
+
+<section><h2>3 · Tracker</h2>
+<div class="mut">Live from Creditcoin: the order only moves when a proof lands. Silence after grace = default; a proof of an on-time payment cures it.</div>
+<label>Order id</label><input id="t-id" value="1"><button id="t-load" class="sec">Refresh</button>
+<div id="t-out"></div>
+<button id="t-default" class="sec">Declare default (anyone)</button> <button id="t-final" class="sec">Finalize default</button></section>
+
+<section><h2>4 · Credit passport</h2>
+<div class="mut">ERC-5192 soulbound. Not a score — a record of payment facts, each one an Attestcoin-verified installment.</div>
+<label>Address</label><input id="p-addr" placeholder="0x… (defaults to you)"><button id="p-load" class="sec">Show</button>
+<div id="p-out"></div>
+<div style="margin-top:12px"><span class="mut">Share this checkout:</span> <img id="qr" alt="QR" style="display:block;margin-top:6px;border-radius:8px;background:#fff;padding:4px" width="120" height="120"></div></section>
+
+<section id="log"><h2>Worker</h2><div id="log-body" class="mono"></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);const E=ethers;
+const ESCROW_ABI=['function createOrder(address buyer,address asset,uint256 tokenId,address payee,address payToken,uint256 price,uint8 n,uint64 firstDeadline,uint64 interval) returns (uint256)','function nextOrderId() view returns (uint256)','function getOrder(uint256) view returns (tuple(address seller,address buyer,address asset,uint256 tokenId,address payee,address payToken,uint64 firstDeadline,uint64 interval,uint8 n,uint8 paidCount,uint8 disputedNo,uint8 status,uint64 assertedAt,uint256[] amounts))','function paid(uint256,uint8) view returns (bool)','function passport() view returns (address)','function declareDefault(uint256)','function finalizeDefault(uint256)','function GRACE() view returns (uint64)','function CURE_WINDOW() view returns (uint64)'];
+const PASS_ABI=['function records(address) view returns (uint32 honored,uint32 defaulted,uint128 volume)','function depositBps(address) view returns (uint16)','function balanceOf(address) view returns (uint256)'];
+const ASSET_ABI=['function mint(address) returns (uint256)','function next() view returns (uint256)','function approve(address,uint256)','function ownerOf(uint256) view returns (address)'];
+const ROUTER_ABI=['function payWithPermit(address escrow,uint256 orderId,uint8 installmentNo,address token,address payee,uint256 amount,uint256 deadline,uint8 v,bytes32 r,bytes32 s)'];
+const USDC_ABI=['function mint(address,uint256)','function nonces(address) view returns (uint256)','function name() view returns (string)','function balanceOf(address) view returns (uint256)'];
+const CHAININFO_ABI=['function get_latest_attestation_height_and_hash(uint64) view returns (tuple(uint64 height,bytes32 hash,bool isAttestation,bool exists))'];
+const STATUS=['Active','DefaultAsserted','Defaulted','Completed'];
+let cfg,me,signer,ccRead,sepRead;
+const log=(m,c='')=>{const d=document.createElement('div');d.className=c;d.textContent=new Date().toLocaleTimeString()+'  '+m;$('#log-body').prepend(d)};
+const fmt=x=>(Number(x)/1e6).toFixed(2)+' tUSDC';
+async function init(){cfg=await (await fetch('/state')).json();ccRead=new E.JsonRpcProvider(cfg.ccRpc);sepRead=new E.JsonRpcProvider(cfg.sepoliaRpc);
+ $('#qr').src='https://api.qrserver.com/v1/create-qr-code/?size=120x120&data='+encodeURIComponent(location.href);refreshWorker();setInterval(refreshWorker,15000);}
+async function net(chainIdHex,add){const p=window.ethereum;try{await p.request({method:'wallet_switchEthereumChain',params:[{chainId:chainIdHex}]})}catch(e){if(e.code===4902&&add)await p.request({method:'wallet_addEthereumChain',params:[add]});else throw e}
+ const bp=new E.BrowserProvider(p);signer=await bp.getSigner();return signer}
+const CC={chainId:'0x18e8f',chainName:'Creditcoin CC3 Testnet',rpcUrls:['https://rpc.cc3-testnet.creditcoin.network'],nativeCurrency:{name:'tCTC',symbol:'tCTC',decimals:18},blockExplorerUrls:['https://explorer.cc3-testnet.creditcoin.network']};
+const SEP={chainId:'0xaa36a7',chainName:'Sepolia',rpcUrls:['https://ethereum-sepolia-rpc.publicnode.com'],nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18}};
+$('#connect').onclick=async()=>{if(!window.ethereum)return alert('Install MetaMask');const [a]=await window.ethereum.request({method:'eth_requestAccounts'});me=E.getAddress(a);$('#who').textContent=me;log('connected '+me)};
+// 1 seller
+$('#s-create').onclick=async()=>{try{const s=await net(CC.chainId,CC);const asset=new E.Contract(cfg.asset,ASSET_ABI,s),esc=new E.Contract(cfg.escrow,ESCROW_ABI,s);
+ const id=await asset.next();$('#s-out').textContent='minting asset #'+id+'…';await (await asset.mint(me)).wait();await (await asset.approve(cfg.escrow,id)).wait();
+ const head=await sepRead.getBlockNumber();const first=(Math.floor(head/1000)+2)*1000;const buyer=$('#s-buyer').value||me;
+ const tx=await esc.createOrder(buyer,cfg.asset,id,me,cfg.usdc,BigInt(Math.round(+$('#s-price').value*1e6)),+$('#s-n').value,first,+$('#s-int').value);await tx.wait();
+ const oid=(await esc.nextOrderId())-1n;$('#s-out').innerHTML=`order <b>${oid}</b> created · asset #${id} escrowed · first deadline Sepolia height ${first}`;$('#b-id').value=$('#t-id').value=oid;log('order '+oid+' created','ok');loadOrder()}catch(e){$('#s-out').textContent=e.shortMessage||e.message}};
+// 2 buyer
+let order;async function loadOrder(){const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const id=+$('#b-id').value;order=await esc.getOrder(id);if(order.n==0){$('#b-sched').textContent='no such order';return}
+ let h='<table><tr><th>#</th><th>amount</th><th>deadline (Sepolia height)</th><th></th></tr>';for(let i=0;i<order.n;i++){const p=await esc.paid(id,i);h+=`<tr><td>${i}</td><td>${fmt(order.amounts[i])}</td><td>${order.firstDeadline+BigInt(i)*order.interval}</td><td>${p?'<span class=ok>proven ✓</span>':'<span class=mut>due</span>'}</td></tr>`}
+ h+='</table>';$('#b-sched').innerHTML=h}
+$('#b-load').onclick=loadOrder;
+async function permitDigest(usdc,owner,spender,value,deadline){const nonce=await usdc.nonces(owner);const name=await usdc.name();
+ return {domain:{name,version:'1',chainId:11155111,verifyingContract:cfg.usdc},types:{Permit:[{name:'owner',type:'address'},{name:'spender',type:'address'},{name:'value',type:'uint256'},{name:'nonce',type:'uint256'},{name:'deadline',type:'uint256'}]},msg:{owner,spender,value,nonce,deadline}}}
+$('#b-deposit').onclick=async()=>{try{await loadOrder();const s=await net(SEP.chainId,SEP);const usdc=new E.Contract(cfg.usdc,USDC_ABI,s),router=new E.Contract(cfg.router,ROUTER_ABI,s);const id=+$('#b-id').value;const amt=order.amounts[0];
+ if(await usdc.balanceOf(me)<amt){$('#b-out').textContent='minting test USDC…';await (await usdc.mint(me,amt*4n)).wait()}
+ const dl=Math.floor(Date.now()/1000)+3600;const d=await permitDigest(usdc,me,cfg.router,amt,dl);const sig=E.Signature.from(await s.signTypedData(d.domain,d.types,d.msg));
+ const tx=await router.payWithPermit(cfg.escrow,id,0,cfg.usdc,order.payee,amt,dl,sig.v,sig.r,sig.s);$('#b-out').textContent='paying… '+tx.hash;await tx.wait();$('#b-out').innerHTML=`deposit paid on Sepolia: <span class=ok>${tx.hash}</span><br>the worker will prove it on Creditcoin in ~10 min`;log('deposit paid '+tx.hash,'ok')}catch(e){$('#b-out').textContent=e.shortMessage||e.message}};
+$('#b-autopay').onclick=async()=>{try{await loadOrder();const s=await net(SEP.chainId,SEP);const usdc=new E.Contract(cfg.usdc,USDC_ABI,s);const id=+$('#b-id').value;const gap=+$('#b-gap').value;const now=Math.floor(Date.now()/1000);
+ let total=0n;for(let i=1;i<order.n;i++)total+=order.amounts[i];if(await usdc.balanceOf(me)<total){$('#b-out').textContent='minting test USDC…';await (await usdc.mint(me,total)).wait()}
+ const domain={name:await usdc.name(),version:'1',chainId:11155111,verifyingContract:cfg.usdc};const types={ReceiveWithAuthorization:[{name:'from',type:'address'},{name:'to',type:'address'},{name:'value',type:'uint256'},{name:'validAfter',type:'uint256'},{name:'validBefore',type:'uint256'},{name:'nonce',type:'bytes32'}]};
+ const list=[];for(let i=1;i<order.n;i++){const validAfter=now+gap*i,validBefore=validAfter+7*86400,nonce=E.hexlify(E.randomBytes(32));const value=order.amounts[i];
+  const sig=E.Signature.from(await s.signTypedData(domain,types,{from:me,to:cfg.router,value,validAfter,validBefore,nonce}));
+  list.push({orderId:String(id),installmentNo:i,token:cfg.usdc,payee:order.payee,amount:value.toString(),from:me,validAfter,validBefore,nonce,v:sig.v,r:sig.r,s:sig.s})}
+ const r=await (await fetch('/authorizations',{method:'POST',body:JSON.stringify(list)})).json();$('#b-out').innerHTML=`<span class=ok>${r.accepted} authorizations signed & handed to the worker.</span> Close your laptop — installments pay themselves every ${gap}s and get proven on Creditcoin.`;log('autopay armed: '+r.accepted+' installments','ok')}catch(e){$('#b-out').textContent=e.shortMessage||e.message}};
+// 3 tracker
+async function track(){const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const id=+$('#t-id').value;const o=await esc.getOrder(id);if(o.n==0){$('#t-out').textContent='no such order';return}
+ const ci=new E.Contract('0x0000000000000000000000000000000000000fD3',CHAININFO_ABI,ccRead);const att=await ci.get_latest_attestation_height_and_hash(cfg.chainKey);const grace=await esc.GRACE();const cure=await esc.CURE_WINDOW();const ccBlock=await ccRead.getBlockNumber();
+ let k=0;for(;k<o.n;k++)if(!(await esc.paid(id,k)))break;const dl=k<o.n?o.firstDeadline+BigInt(k)*o.interval:null;
+ const cls={0:'ok',1:'warn',2:'bad',3:'ok'}[o.status];let h=`<p>status <span class="pill ${cls}">${STATUS[o.status]}</span> · paid ${o.paidCount}/${o.n} · asset #${o.tokenId}</p>`;
+ h+=`<p class=mut>attested Sepolia height <b>${att.height}</b>`+(dl?` · next deadline ${dl} (+grace ${grace} = ${dl+grace}) → ${att.height>dl+grace?'<span class=bad>overdue: default can be asserted</span>':'<span class=ok>in time</span>'}`:'')+`</p>`;
+ if(o.status==1)h+=`<p class=warn>default asserted on installment #${o.disputedNo} at CC3 block ${o.assertedAt}; cure window ends at ${o.assertedAt+cure} (now ${ccBlock}). A proof of an on-time payment cures it.</p>`;
+ if(o.status==3)h+=`<p class=ok>asset transferred to buyer ${o.buyer}</p>`;if(o.status==2)h+=`<p class=bad>asset returned to seller ${o.seller}; paid installments kept.</p>`;$('#t-out').innerHTML=h}
+$('#t-load').onclick=track;
+$('#t-default').onclick=async()=>{try{const s=await net(CC.chainId,CC);const tx=await new E.Contract(cfg.escrow,ESCROW_ABI,s).declareDefault(+$('#t-id').value);await tx.wait();log('default asserted '+tx.hash,'warn');track()}catch(e){log(e.shortMessage||e.message,'bad')}};
+$('#t-final').onclick=async()=>{try{const s=await net(CC.chainId,CC);const tx=await new E.Contract(cfg.escrow,ESCROW_ABI,s).finalizeDefault(+$('#t-id').value);await tx.wait();log('default finalized '+tx.hash,'bad');track()}catch(e){log(e.shortMessage||e.message,'bad')}};
+// 4 passport
+$('#p-load').onclick=async()=>{const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const p=new E.Contract(await esc.passport(),PASS_ABI,ccRead);const a=$('#p-addr').value||me;if(!a)return;const r=await p.records(a);const bps=await p.depositBps(a);
+ $('#p-out').innerHTML=`<table><tr><td>installments honored (each one an Attestcoin proof)</td><td><b>${r.honored}</b></td></tr><tr><td>defaults consumed</td><td><b>${r.defaulted}</b></td></tr><tr><td>volume proven</td><td>${fmt(r.volume)}</td></tr><tr><td>next deposit</td><td><b>${Number(bps)/100} %</b></td></tr><tr><td>passport token</td><td>${(await p.balanceOf(a))>0n?'<span class=ok>minted (soulbound)</span>':'<span class=mut>none yet</span>'}</td></tr></table>`};
+async function refreshWorker(){try{const s=await (await fetch('/state')).json();const b=$('#log-body');const lines=[];
+ for(const a of s.autopay)lines.push(`autopay order ${a.orderId} #${a.installmentNo} ${a.txHash?'paid '+a.txHash:a.error?'failed: '+a.error:'due at '+new Date(a.validAfter*1000).toLocaleTimeString()}`);
+ for(const p of s.pending)lines.push(`pending proof for ${p.hash} (Sepolia ${p.height})`);for(const t of s.settles)lines.push(`settled ${t.count} installment(s) in ${t.tx} — ${t.gas} gas (${Math.round(t.gas/t.count)} each)`);
+ b.innerHTML=lines.reverse().map(l=>`<div>${l}</div>`).join('')||'<div class=mut>idle</div>'}catch{}}
+init();
+</script></body></html>
