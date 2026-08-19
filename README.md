@@ -56,3 +56,14 @@ sh script/demo.sh finalize 1    #        cure window passes → asset back to se
 
 Order 1 lifecycle on chain: created → 4 installments paid on Sepolia → proven & settled (1 + 3) → Completed, `DemoAsset #1` now owned by the buyer, passport `honored = 4` → `depositBps = 1500`.
 Order 2 (deadline already past): `declareDefault` accepted against the ChainInfo attested height → `DefaultAsserted` → `finalizeDefault` after the cure window.
+
+### Proof freshness (raw precompile `verify`, `node script/gas-probe.mjs`, attested height 11 524 740)
+
+| age | continuity roots | verify() gas |
+|---|---|---|
+| fresh (~10 min) | 1 | 43 748 |
+| +6 h | 61 | 85 665 |
+| +24 h | 62 | 84 284 |
+| +7 d | 62 | 86 127 |
+
+Measured, not assumed: an aged proof costs ~2× a fresh one (the prover anchors on the nearest checkpoint, ~60 roots), and it stays flat after that. Batching (−51 % measured) is the bigger lever; freshness is the second.
