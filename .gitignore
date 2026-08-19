@@ -4,3 +4,4 @@ cache/
 broadcast/
 .env
 *.log
+worker/state.json
