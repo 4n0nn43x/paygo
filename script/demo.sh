@@ -34,8 +34,8 @@ pay)
   cast send $USDC_ADDRESS "approve(address,uint256)" $ROUTER_ADDRESS $AMT $SEP >/dev/null 2>&1
   TX=$(cast send $ROUTER_ADDRESS "payInstallment(address,uint256,uint8,address,address,uint256)" $ESCROW_ADDRESS $OID $N $USDC_ADDRESS $ME $AMT $SEP --json 2>/dev/null | grep -o '"transactionHash":"0x[0-9a-f]*"' | cut -d'"' -f4 | head -1)
   echo "paid installment $N of order $OID on Sepolia: $TX  (the worker will prove & settle it)";;
-default)  cast send $ESCROW_ADDRESS "declareDefault(uint256)" $2 $CC 2>/dev/null | grep -E "status|transactionHash";;
-finalize) cast send $ESCROW_ADDRESS "finalizeDefault(uint256)" $2 $CC 2>/dev/null | grep -E "status|transactionHash";;
+default)  cast send $ESCROW_ADDRESS "declareDefault(uint256)" $2 $CC 2>&1 | grep -E "^status|^transactionHash|Error";;
+finalize) cast send $ESCROW_ADDRESS "finalizeDefault(uint256)" $2 $CC 2>&1 | grep -E "^status|^transactionHash|Error";;
 show)     cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint256[]))" $2 --rpc-url $CREDITCOIN_RPC_URL;;
 *) sed -n 2,8p "$0";;
 esac
