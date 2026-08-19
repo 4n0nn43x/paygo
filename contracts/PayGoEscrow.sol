@@ -79,8 +79,9 @@ contract PayGoEscrow {
         uint64 firstDeadline,
         uint64 interval
     ) external returns (uint256 id) {
-        require(n > 0 && n <= 64 && price > 0, "1..64 installments");
+        require(n > 0 && n <= 64 && price >= n, "1..64 installments, price >= n");
         require(firstDeadline % EPOCH == 0 && interval % EPOCH == 0 && interval > 0, "not epoch-aligned");
+        require(buyer != msg.sender && buyer != address(0), "no self-dealing");   // trivial passport-sybil gate
         id = nextOrderId++;
         Order storage o = orders[id];
         o.seller = msg.sender;
@@ -97,6 +98,7 @@ contract PayGoEscrow {
         else {
             uint256 deposit = price * passport.depositBps(buyer) / 10_000;
             uint256 each = (price - deposit) / (n - 1);
+            require(each > 0, "price too small for n installments");
             amounts[0] = deposit;
             for (uint8 i = 1; i < n; i++) amounts[i] = each;
             amounts[n - 1] += (price - deposit) - each * (n - 1);   // dust to the last one
@@ -137,27 +139,31 @@ contract PayGoEscrow {
         for (uint256 i; i < len; i++) _apply(heights[i], txs[i]);
     }
 
+    /// @dev A settled batch may bundle txs/logs from many orders; a single non-applicable log must not
+    ///      revert the batch, or a griefer could co-locate a bad log with a victim's payment and brick
+    ///      it forever (the nullifier is per-tx). So the 5 checks are FILTERS here: a log that fails any
+    ///      of them is skipped, and the applicable logs still settle. Proof integrity (nullifier +
+    ///      verifyAndEmit) is enforced in `settle` before we ever get here and stays a hard revert.
     function _apply(uint64 height, bytes calldata txBytes) internal {
         EvmV1Decoder.ReceiptFields memory r = EvmV1Decoder.decodeReceiptFields(txBytes);
-        require(r.receiptStatus == 1, "tx failed");                       // precompile doesn't check it
+        if (r.receiptStatus != 1) return;                                 // precompile doesn't check it; failed tx → nothing to apply
         EvmV1Decoder.LogEntry[] memory logs = EvmV1Decoder.getLogsByEventSignature(r, PAID_SIG);
-        require(logs.length > 0, "no InstallmentPaid");
         for (uint256 i; i < logs.length; i++) _applyLog(height, logs[i]);
     }
 
     function _applyLog(uint64 height, EvmV1Decoder.LogEntry memory log) internal {
-        require(log.address_ == ROUTER, "wrong emitter");                 // signature filter alone is forgeable
-        require(log.topics.length == 3, "topics");
-        require(address(uint160(uint256(log.topics[1]))) == address(this), "wrong escrow");
+        if (log.address_ != ROUTER) return;                              // signature filter alone is forgeable
+        if (log.topics.length != 3) return;
+        if (address(uint160(uint256(log.topics[1]))) != address(this)) return;   // for a different escrow deployment
         uint256 id = uint256(log.topics[2]);
         (uint8 no, , address payee, address token, uint256 amount) =
             abi.decode(log.data, (uint8, address, address, address, uint256));
 
         Order storage o = orders[id];
-        require(o.status == Status.Active || o.status == Status.DefaultAsserted, "order closed");
-        require(no < o.n && !paid[id][no], "bad installment");
-        require(payee == o.payee && token == o.payToken && amount >= o.amounts[no], "payment mismatch");
-        require(height <= deadline(id, no), "late payment");              // v1: late never cures
+        if (!(o.status == Status.Active || o.status == Status.DefaultAsserted)) return;   // closed order
+        if (no >= o.n || paid[id][no]) return;                           // unknown/already-paid installment
+        if (payee != o.payee || token != o.payToken || amount < o.amounts[no]) return;    // payment mismatch
+        if (height > deadline(id, no)) return;                           // v1: late never cures
 
         paid[id][no] = true;
         o.paidCount++;

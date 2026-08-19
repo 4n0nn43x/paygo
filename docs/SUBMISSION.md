@@ -72,7 +72,9 @@ node script/gas-probe.mjs                 # freshness table
 Versions pinned: `@gluwa/usc-sdk@0.18.0`, `@gluwa/usc-contracts@0.1.2`, solc 0.8.30, EvmV1Decoder testnet lib `0x731c345d79Fb8BbDC541f9DF3b6317585F849F9f`, chainKey Sepolia = 1 (CC3 testnet; mainnet differs — constant per env).
 
 ## Assumptions & limits (stated)
-1. A buyer with no passport pays the full 40 % deposit — Sybil resistance by construction, not by identity.
+1. A buyer with no passport pays the full 40 % deposit. The 15 % tier is a convenience discount, never a
+   security boundary; a two-wallet collusion can manufacture history (raised cost, not eliminated — see
+   `AUDIT.md` MEDIUM-2). The asset stays escrowed and reverts to the seller on default regardless.
 2. The seller carries the asset risk (standard hire-purchase); no lender pool in v1.
 3. A late payment never cures (v1). "Cure with penalty" is a product knob, not a protocol change.
 4. Return path to Ethereum is out of scope until writability ships.

@@ -41,15 +41,19 @@ contract PayGoRouterTest is Test {
         assertEq(usdc.balanceOf(payee), 40e6);
     }
 
-    function _auth(uint256 after_, uint256 before_, bytes32 nonce, uint256 amount) internal view returns (PayGoRouter.Authorization memory a) {
-        (a.v, a.r, a.s) = vm.sign(buyerPk, _hash(keccak256(abi.encode(usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
-            buyer, address(router), amount, after_, before_, nonce))));
-        a.from = buyer; a.validAfter = after_; a.validBefore = before_; a.nonce = nonce;
+    // buyer signs with the routing-bound nonce = keccak256(escrow, orderId, installmentNo, payee)
+    function _auth(uint256 after_, uint256 before_, uint256 amount, address escrow_, uint256 id, uint8 no, address payee_)
+        internal view returns (PayGoRouter.Authorization memory a)
+    {
+        bytes32 sh = keccak256(abi.encode(usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
+            buyer, address(router), amount, after_, before_, router.authNonce(escrow_, id, no, payee_)));
+        (a.v, a.r, a.s) = vm.sign(buyerPk, _hash(sh));
+        a.from = buyer; a.validAfter = after_; a.validBefore = before_;
     }
 
     function test_payWithAuthorization_presignedSubmittedByAnyone() public {
-        // buyer pre-signs at checkout: valid from t+1h to t+2h, random nonce
-        PayGoRouter.Authorization memory a = _auth(block.timestamp + 1 hours, block.timestamp + 2 hours, keccak256("n1"), 20e6);
+        // buyer pre-signs at checkout: valid from t+1h to t+2h
+        PayGoRouter.Authorization memory a = _auth(block.timestamp + 1 hours, block.timestamp + 2 hours, 20e6, escrow, 1, 1, payee);
 
         vm.prank(address(0xA11CE));                                   // anyone, too early
         vm.expectRevert("authorization not yet valid");
@@ -66,12 +70,23 @@ contract PayGoRouterTest is Test {
         router.payWithAuthorization(escrow, 1, 1, address(usdc), payee, 20e6, a);
     }
 
+    // HIGH-1 regression: a submitter cannot redirect a pre-signed autopay to themselves
+    function test_payWithAuthorization_payeeIsBound() public {
+        address attacker = address(0xBAD);
+        PayGoRouter.Authorization memory a = _auth(0, block.timestamp + 1 hours, 20e6, escrow, 1, 1, payee);
+        vm.prank(attacker);
+        vm.expectRevert("invalid signature");                        // nonce for attacker-payee != signed nonce
+        router.payWithAuthorization(escrow, 1, 1, address(usdc), attacker, 20e6, a);
+        assertEq(usdc.balanceOf(attacker), 0);
+    }
+
     function test_authorization_boundToRouter() public {
+        bytes32 nonce = router.authNonce(escrow, 1, 1, payee);
         bytes32 digest = _hash(keccak256(abi.encode(usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),
-            buyer, address(router), 20e6, 0, block.timestamp + 1, keccak256("n2"))));
+            buyer, address(router), 20e6, 0, block.timestamp + 1, nonce)));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(buyerPk, digest);
-        vm.expectRevert("invalid signature");                        // signed for the router: a thief can't redirect it
-        usdc.receiveWithAuthorization(buyer, address(this), 20e6, 0, block.timestamp + 1, keccak256("n2"), v, r, s);
+        vm.expectRevert("invalid signature");                        // signed to=router: a thief calling the token as themselves is rejected
+        usdc.receiveWithAuthorization(buyer, address(this), 20e6, 0, block.timestamp + 1, nonce, v, r, s);
     }
 
     function _hash(bytes32 structHash) internal view returns (bytes32) {

@@ -110,33 +110,31 @@ contract PayGoEscrowTest is Test {
         settleOne(10_000, goodTx(0), 0);
     }
 
-    function test_failedTx_rejected() public {
-        vm.expectRevert("tx failed");
+    function test_failedTx_notCredited() public {
         settleOne(10_000, encodeTx(ROUTER, address(esc), orderId, 0, PAYEE, USDC, amounts[0], 0), 0);
+        assertFalse(esc.paid(orderId, 0));
     }
 
-    function test_forgedEmitter_rejected() public {
-        vm.expectRevert("wrong emitter");
+    function test_forgedEmitter_notCredited() public {
         settleOne(10_000, encodeTx(address(0xBAD), address(esc), orderId, 0, PAYEE, USDC, amounts[0], 1), 0);
+        assertFalse(esc.paid(orderId, 0));
     }
 
-    function test_wrongEscrow_rejected() public {
-        vm.expectRevert("wrong escrow");
+    function test_wrongEscrow_notCredited() public {
         settleOne(10_000, encodeTx(ROUTER, address(0xBAD), orderId, 0, PAYEE, USDC, amounts[0], 1), 0);
+        assertFalse(esc.paid(orderId, 0));
     }
 
-    function test_underpaid_wrongPayee_wrongToken_rejected() public {
-        vm.expectRevert("payment mismatch");
+    function test_underpaid_wrongPayee_wrongToken_notCredited() public {
         settleOne(10_000, encodeTx(ROUTER, address(esc), orderId, 0, PAYEE, USDC, amounts[0] - 1, 1), 0);
-        vm.expectRevert("payment mismatch");
         settleOne(10_000, encodeTx(ROUTER, address(esc), orderId, 0, address(0xBAD), USDC, amounts[0], 1), 1);
-        vm.expectRevert("payment mismatch");
         settleOne(10_000, encodeTx(ROUTER, address(esc), orderId, 0, PAYEE, address(0xBAD), amounts[0], 1), 2);
+        assertFalse(esc.paid(orderId, 0));
     }
 
-    function test_latePayment_rejected() public {
-        vm.expectRevert("late payment");
+    function test_latePayment_notCredited() public {
         settleOne(10_001, goodTx(0), 0);
+        assertFalse(esc.paid(orderId, 0));
     }
 
     // ---- state machine: default / cure / finalize
@@ -171,8 +169,8 @@ contract PayGoEscrowTest is Test {
         assertEq(nft.ownerOf(1), seller);
         (, uint32 defaulted,) = esc.passport().records(buyer);
         assertEq(defaulted, 1);
-        vm.expectRevert("order closed");
-        settleOne(11_000, goodTx(1), 1);
+        settleOne(11_000, goodTx(1), 1);          // now a no-op, not a revert
+        assertFalse(esc.paid(orderId, 1));
     }
 
     function test_declareDefault_targetsEarliestUnpaid() public {
@@ -181,6 +179,45 @@ contract PayGoEscrowTest is Test {
         MockChainInfo(CHAIN_INFO).setHeight(20_000);
         esc.declareDefault(orderId);
         assertEq(esc.getOrder(orderId).disputedNo, 1);
+    }
+
+    function test_noSelfDealing() public {
+        uint256 t = nft.mint(seller);
+        vm.startPrank(seller);
+        nft.approve(address(esc), t);
+        vm.expectRevert("no self-dealing");
+        esc.createOrder(seller, nft, t, PAYEE, USDC, 100e6, 4, 20_000, 1000);
+        vm.stopPrank();
+    }
+
+    // MEDIUM-1 regression: a poison log (already-paid installment) co-located with a fresh one
+    // must not brick the fresh one. Encode a single tx carrying two InstallmentPaid logs.
+    function test_batch_poisonLogDoesNotBrickSibling() public {
+        settleOne(10_000, goodTx(0), 0);                 // installment 0 paid
+        // tx with logs for installment 0 (already paid → skipped) and installment 1 (fresh → applied)
+        bytes memory txb = _twoLogTx();
+        uint64[] memory hs = new uint64[](1); hs[0] = 11_000;
+        bytes[] memory txs = new bytes[](1); txs[0] = txb;
+        INativeQueryVerifier.MerkleProof[] memory ps = new INativeQueryVerifier.MerkleProof[](1);
+        ps[0] = INativeQueryVerifier.MerkleProof(bytes32(uint256(99)), new INativeQueryVerifier.MerkleProofEntry[](0));
+        esc.settle(hs, txs, ps, INativeQueryVerifier.ContinuityProof(bytes32(0), new bytes32[](0)));
+        assertTrue(esc.paid(orderId, 1));               // sibling settled despite the poison log
+    }
+
+    function _twoLogTx() internal view returns (bytes memory) {
+        EvmV1Decoder.LogEntry[] memory _l; _l;
+        bytes32 sig = keccak256("InstallmentPaid(address,uint256,uint8,address,address,address,uint256)");
+        EvmV1Decoder.LogEntryTuple[] memory logs = new EvmV1Decoder.LogEntryTuple[](2);
+        for (uint8 k; k < 2; k++) {
+            bytes32[] memory topics = new bytes32[](3);
+            topics[0] = sig; topics[1] = bytes32(uint256(uint160(address(esc)))); topics[2] = bytes32(orderId);
+            logs[k] = EvmV1Decoder.LogEntryTuple(ROUTER, topics, abi.encode(k, address(0xCAFE), PAYEE, USDC, amounts[k]));
+        }
+        bytes[] memory chunks = new bytes[](3);
+        chunks[0] = abi.encode(uint64(0), uint64(0), address(0), false, address(0), uint256(0), bytes(""));
+        chunks[1] = "";
+        chunks[2] = abi.encode(uint8(1), uint64(50_000), logs, bytes(""));
+        return abi.encode(uint8(2), chunks);
     }
 
     function test_createOrder_mustBeEpochAligned() public {

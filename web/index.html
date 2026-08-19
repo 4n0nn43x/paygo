@@ -92,9 +92,12 @@ $('#b-deposit').onclick=async()=>{try{await loadOrder();const s=await net(SEP.ch
 $('#b-autopay').onclick=async()=>{try{await loadOrder();const s=await net(SEP.chainId,SEP);const usdc=new E.Contract(cfg.usdc,USDC_ABI,s);const id=+$('#b-id').value;const gap=+$('#b-gap').value;const now=Math.floor(Date.now()/1000);
  let total=0n;for(let i=1;i<order.n;i++)total+=order.amounts[i];if(await usdc.balanceOf(me)<total){$('#b-out').textContent='minting test USDC…';await (await usdc.mint(me,total)).wait()}
  const domain={name:await usdc.name(),version:'1',chainId:11155111,verifyingContract:cfg.usdc};const types={ReceiveWithAuthorization:[{name:'from',type:'address'},{name:'to',type:'address'},{name:'value',type:'uint256'},{name:'validAfter',type:'uint256'},{name:'validBefore',type:'uint256'},{name:'nonce',type:'bytes32'}]};
- const list=[];for(let i=1;i<order.n;i++){const validAfter=now+gap*i,validBefore=validAfter+7*86400,nonce=E.hexlify(E.randomBytes(32));const value=order.amounts[i];
+ const abi=E.AbiCoder.defaultAbiCoder();
+ const list=[];for(let i=1;i<order.n;i++){const validAfter=now+gap*i,validBefore=validAfter+7*86400;const value=order.amounts[i];
+  // routing-bound nonce = keccak256(escrow, orderId, installmentNo, payee): the Router recomputes it, so payee can't be swapped
+  const nonce=E.keccak256(abi.encode(['address','uint256','uint8','address'],[cfg.escrow,id,i,order.payee]));
   const sig=E.Signature.from(await s.signTypedData(domain,types,{from:me,to:cfg.router,value,validAfter,validBefore,nonce}));
-  list.push({orderId:String(id),installmentNo:i,token:cfg.usdc,payee:order.payee,amount:value.toString(),from:me,validAfter,validBefore,nonce,v:sig.v,r:sig.r,s:sig.s})}
+  list.push({orderId:String(id),installmentNo:i,token:cfg.usdc,payee:order.payee,amount:value.toString(),from:me,validAfter,validBefore,v:sig.v,r:sig.r,s:sig.s})}
  const r=await (await fetch('/authorizations',{method:'POST',body:JSON.stringify(list)})).json();$('#b-out').innerHTML=`<span class=ok>${r.accepted} authorizations signed & handed to the worker.</span> Close your laptop — installments pay themselves every ${gap}s and get proven on Creditcoin.`;log('autopay armed: '+r.accepted+' installments','ok')}catch(e){$('#b-out').textContent=e.shortMessage||e.message}};
 // 3 tracker
 async function track(){const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const id=+$('#t-id').value;const o=await esc.getOrder(id);if(o.n==0){$('#t-out').textContent='no such order';return}

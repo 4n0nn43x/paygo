@@ -47,17 +47,25 @@ contract PayGoRouter {
         emit InstallmentPaid(escrow, orderId, installmentNo, msg.sender, payee, token, amount);
     }
 
-    /// @dev EIP-3009 authorization pre-signed by the buyer.
-    struct Authorization { address from; uint256 validAfter; uint256 validBefore; bytes32 nonce; uint8 v; bytes32 r; bytes32 s; }
+    /// @dev EIP-3009 authorization pre-signed by the buyer. The nonce is NOT free: the buyer signs
+    ///      nonce = keccak256(escrow, orderId, installmentNo, payee), so the signature commits to where
+    ///      the money goes. A submitter who changes payee changes the nonce → signature no longer
+    ///      recovers `from` → the token reverts. This is what actually stops autopay theft.
+    struct Authorization { address from; uint256 validAfter; uint256 validBefore; uint8 v; bytes32 r; bytes32 s; }
+
+    function authNonce(address escrow, uint256 orderId, uint8 installmentNo, address payee) public pure returns (bytes32) {
+        return keccak256(abi.encode(escrow, orderId, installmentNo, payee));
+    }
 
     /// @notice Autopay: authorization pre-signed by the buyer at checkout, submitted by anyone once
-    ///         `validAfter` is reached. `receiveWith…` (not `transferWith…`) so only this contract can
-    ///         consume it — no front-running to a different payee.
+    ///         `validAfter` is reached. `receiveWith…` (not `transferWith…`) keeps the token flowing
+    ///         through this contract; the routing-bound nonce keeps it flowing to the signed payee.
     function payWithAuthorization(
         address escrow, uint256 orderId, uint8 installmentNo, address token, address payee, uint256 amount,
         Authorization calldata a
     ) external {
-        IERC3009(token).receiveWithAuthorization(a.from, address(this), amount, a.validAfter, a.validBefore, a.nonce, a.v, a.r, a.s);
+        bytes32 nonce = authNonce(escrow, orderId, installmentNo, payee);
+        IERC3009(token).receiveWithAuthorization(a.from, address(this), amount, a.validAfter, a.validBefore, nonce, a.v, a.r, a.s);
         IERC20(token).safeTransfer(payee, amount);
         emit InstallmentPaid(escrow, orderId, installmentNo, a.from, payee, token, amount);
     }

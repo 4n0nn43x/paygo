@@ -18,7 +18,7 @@ const PORT = Number(process.env.PORT ?? 8787);
 
 const ROUTER_ABI = [
   'event InstallmentPaid(address indexed escrow,uint256 indexed orderId,uint8 installmentNo,address payer,address payee,address token,uint256 amount)',
-  'function payWithAuthorization(address escrow,uint256 orderId,uint8 installmentNo,address token,address payee,uint256 amount,(address from,uint256 validAfter,uint256 validBefore,bytes32 nonce,uint8 v,bytes32 r,bytes32 s) a)',
+  'function payWithAuthorization(address escrow,uint256 orderId,uint8 installmentNo,address token,address payee,uint256 amount,(address from,uint256 validAfter,uint256 validBefore,uint8 v,bytes32 r,bytes32 s) a)',
 ];
 const ESCROW_ABI = ['function settle(uint64[] heights,bytes[] txs,(bytes32 root,(bytes32 hash,bool isLeft)[] siblings)[] proofs,(bytes32 lowerEndpointDigest,bytes32[] roots) continuity)'];
 
@@ -32,7 +32,7 @@ const prover = new proofProvider.service.ProofBuilder(CHAIN_KEY, env('PROOF_BUIL
 
 type Pending = { hash: string; height: number };
 type Auth = { orderId: string; installmentNo: number; token: string; payee: string; amount: string;
-  from: string; validAfter: number; validBefore: number; nonce: string; v: number; r: string; s: string; txHash?: string; error?: string };
+  from: string; validAfter: number; validBefore: number; v: number; r: string; s: string; txHash?: string; error?: string };
 const state: { fromBlock: number; pending: Pending[]; done: string[]; autopay: Auth[]; settles: { tx: string; count: number; gas: string }[] } = existsSync(STATE_FILE)
   ? { autopay: [], settles: [], ...JSON.parse(readFileSync(STATE_FILE, 'utf8')) }
   : { fromBlock: Number(process.env.START_BLOCK ?? 0), pending: [], done: [], autopay: [], settles: [] };
@@ -46,7 +46,7 @@ async function autopay() {
     if (a.validBefore <= now) { a.error = 'expired'; save(); continue; }
     try {
       const tx = await router.payWithAuthorization(env('ESCROW_ADDRESS'), a.orderId, a.installmentNo, a.token, a.payee, a.amount,
-        { from: a.from, validAfter: a.validAfter, validBefore: a.validBefore, nonce: a.nonce, v: a.v, r: a.r, s: a.s });
+        { from: a.from, validAfter: a.validAfter, validBefore: a.validBefore, v: a.v, r: a.r, s: a.s });
       a.txHash = tx.hash; save();
       console.log(`autopay order ${a.orderId} #${a.installmentNo} → ${tx.hash}`);
       await tx.wait();
