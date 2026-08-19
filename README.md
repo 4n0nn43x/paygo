@@ -46,3 +46,9 @@ npm run worker                  #        …worker proves it ~10 min later, escr
 sh script/demo.sh default 1     # act 3: silence after grace → anyone asserts default
 sh script/demo.sh finalize 1    #        cure window passes → asset back to seller
 ```
+
+## Measured on CC3 testnet (real proofs, not estimates)
+
+| Scenario | Tx | Gas | Per installment |
+|---|---|---|---|
+| 1 fresh proof, first installment of order 1 | [`0x818e…2469`](https://explorer.cc3-testnet.creditcoin.network/tx/0x818e27e885c5c8ceb754231548728e7157f7043d82a99300bf7674fd66d92469) | 357 476 | 357 476 |
