@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {EvmV1Decoder} from "@gluwa/usc-contracts/contracts/decoding/EvmV1Decoder.sol";
 import {INativeQueryVerifier} from "../contracts/Attestcoin.sol";
 import {PayGoEscrow} from "../contracts/PayGoEscrow.sol";
+import {CreditPassport} from "../contracts/CreditPassport.sol";
 import {DemoAsset} from "../contracts/Demo.sol";
 import {MockVerifier, MockChainInfo} from "./Mocks.sol";
 
@@ -34,7 +35,7 @@ contract PayGoEscrowTest is Test {
         amounts.push(40e6); amounts.push(20e6); amounts.push(20e6); amounts.push(20e6);
         vm.startPrank(seller);
         nft.approve(address(esc), tokenId);
-        orderId = esc.createOrder(buyer, nft, tokenId, PAYEE, USDC, amounts, 10_000, 1000);
+        orderId = esc.createOrder(buyer, nft, tokenId, PAYEE, USDC, 100e6, 4, 10_000, 1000);   // 40 + 3×20
         vm.stopPrank();
         MockChainInfo(CHAIN_INFO).setHeight(9_000);
     }
@@ -75,8 +76,12 @@ contract PayGoEscrowTest is Test {
         for (uint8 i; i < 4; i++) settleOne(10_000 + uint64(i) * 1000, goodTx(i), i);
         assertEq(uint8(esc.getOrder(orderId).status), uint8(PayGoEscrow.Status.Completed));
         assertEq(nft.ownerOf(1), buyer);
-        assertEq(esc.honored(buyer), 4);
-        assertEq(esc.depositBps(buyer), 1500);
+        (uint32 honored,, uint128 volume) = esc.passport().records(buyer);
+        assertEq(honored, 4);
+        assertEq(volume, 100e6);
+        assertEq(esc.passport().depositBps(buyer), 1500);
+        assertEq(esc.passport().ownerOf(uint160(buyer)), buyer);
+        assertTrue(esc.passport().locked(uint160(buyer)));
     }
 
     function test_batch_manyInstallmentsOneProof() public {
@@ -164,7 +169,8 @@ contract PayGoEscrowTest is Test {
         vm.roll(block.number + CURE + 1);
         esc.finalizeDefault(orderId);
         assertEq(nft.ownerOf(1), seller);
-        assertEq(esc.defaulted(buyer), 1);
+        (, uint32 defaulted,) = esc.passport().records(buyer);
+        assertEq(defaulted, 1);
         vm.expectRevert("order closed");
         settleOne(11_000, goodTx(1), 1);
     }
@@ -180,6 +186,26 @@ contract PayGoEscrowTest is Test {
     function test_createOrder_mustBeEpochAligned() public {
         vm.prank(seller);
         vm.expectRevert("not epoch-aligned");
-        esc.createOrder(buyer, nft, 1, PAYEE, USDC, amounts, 10_001, 1000);
+        esc.createOrder(buyer, nft, 1, PAYEE, USDC, 100e6, 4, 10_001, 1000);
+    }
+
+    function test_passport_reducesDepositOnSecondPurchase() public {
+        for (uint8 i; i < 4; i++) settleOne(10_000 + uint64(i) * 1000, goodTx(i), i);
+        uint256 t2 = nft.mint(seller);
+        vm.startPrank(seller);
+        nft.approve(address(esc), t2);
+        uint256 id2 = esc.createOrder(buyer, nft, t2, PAYEE, USDC, 100e6, 4, 20_000, 1000);
+        vm.stopPrank();
+        uint256[] memory a = esc.getOrder(id2).amounts;
+        assertEq(a[0], 15e6);                  // 15% instead of 40%
+        assertEq(a[1] + a[2] + a[3], 85e6);
+        assertEq(esc.getOrder(orderId).amounts[0], 40e6);
+    }
+
+    function test_passport_isSoulbound() public {
+        settleOne(10_000, goodTx(0), 0);
+        CreditPassport p = esc.passport();
+        vm.expectRevert("soulbound");
+        p.transferFrom(buyer, seller, uint160(buyer));
     }
 }

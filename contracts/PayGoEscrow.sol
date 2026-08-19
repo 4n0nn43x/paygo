@@ -4,6 +4,7 @@ pragma solidity ^0.8.23;
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {EvmV1Decoder} from "@gluwa/usc-contracts/contracts/decoding/EvmV1Decoder.sol";
 import {INativeQueryVerifier, IChainInfo, VERIFIER, CHAIN_INFO} from "./Attestcoin.sol";
+import {CreditPassport} from "./CreditPassport.sol";
 
 /// @title PayGoEscrow — Creditcoin side of PayGo (hire-purchase, cross-chain, trustless).
 /// @notice The asset is escrowed here. Installments are paid in ERC20 on Ethereum through
@@ -45,8 +46,7 @@ contract PayGoEscrow {
     mapping(uint256 => Order) internal orders;
     mapping(uint256 => mapping(uint8 => bool)) public paid;
     mapping(bytes32 => bool) public processed;           // nullifier: the protocol has no replay protection
-    mapping(address => uint32) public honored;           // passport: installments proven on time
-    mapping(address => uint32) public defaulted;         // passport: defaults consumed
+    CreditPassport public immutable passport;            // soulbound facts, written here, read by createOrder
 
     event OrderCreated(uint256 indexed orderId, address indexed seller, address indexed buyer, uint64 firstDeadline, uint64 interval, uint256[] amounts);
     event InstallmentSettled(uint256 indexed orderId, uint8 installmentNo, uint64 sourceHeight);
@@ -60,21 +60,26 @@ contract PayGoEscrow {
         ROUTER = router;
         GRACE = grace;
         CURE_WINDOW = cureWindow;
+        passport = new CreditPassport(address(this));
     }
 
     // ---------------------------------------------------------------- orders
 
+    /// @notice Seller escrows the asset and names the price; PayGo sizes the deposit from the buyer's
+    ///         passport (40% for a newcomer, 15% after 4 honored installments and no default) and
+    ///         splits the remainder evenly over the other installments.
     function createOrder(
         address buyer,
         IERC721 asset,
         uint256 tokenId,
         address payee,
         address payToken,
-        uint256[] calldata amounts,
+        uint256 price,
+        uint8 n,
         uint64 firstDeadline,
         uint64 interval
     ) external returns (uint256 id) {
-        require(amounts.length > 0 && amounts.length <= 64, "1..64 installments");
+        require(n > 0 && n <= 64 && price > 0, "1..64 installments");
         require(firstDeadline % EPOCH == 0 && interval % EPOCH == 0 && interval > 0, "not epoch-aligned");
         id = nextOrderId++;
         Order storage o = orders[id];
@@ -86,7 +91,16 @@ contract PayGoEscrow {
         o.payToken = payToken;
         o.firstDeadline = firstDeadline;
         o.interval = interval;
-        o.n = uint8(amounts.length);
+        o.n = n;
+        uint256[] memory amounts = new uint256[](n);
+        if (n == 1) amounts[0] = price;
+        else {
+            uint256 deposit = price * passport.depositBps(buyer) / 10_000;
+            uint256 each = (price - deposit) / (n - 1);
+            amounts[0] = deposit;
+            for (uint8 i = 1; i < n; i++) amounts[i] = each;
+            amounts[n - 1] += (price - deposit) - each * (n - 1);   // dust to the last one
+        }
         o.amounts = amounts;
         asset.transferFrom(msg.sender, address(this), tokenId);
         emit OrderCreated(id, msg.sender, buyer, firstDeadline, interval, amounts);
@@ -97,11 +111,6 @@ contract PayGoEscrow {
     function deadline(uint256 id, uint8 no) public view returns (uint64) {
         Order storage o = orders[id];
         return o.firstDeadline + uint64(no) * o.interval;
-    }
-
-    /// @notice Passport rule, read by the checkout: 4+ honored, 0 defaults → 15% deposit, else 40%.
-    function depositBps(address buyer) external view returns (uint16) {
-        return (honored[buyer] >= 4 && defaulted[buyer] == 0) ? 1500 : 4000;
     }
 
     // ---------------------------------------------------------------- settle (= cure)
@@ -152,7 +161,7 @@ contract PayGoEscrow {
 
         paid[id][no] = true;
         o.paidCount++;
-        honored[o.buyer]++;
+        passport.record(o.buyer, true, amount);
         emit InstallmentSettled(id, no, height);
 
         if (o.status == Status.DefaultAsserted && no == o.disputedNo) {
@@ -190,7 +199,7 @@ contract PayGoEscrow {
         require(o.status == Status.DefaultAsserted, "not asserted");
         require(block.number > o.assertedAt + CURE_WINDOW, "cure window open");
         o.status = Status.Defaulted;
-        defaulted[o.buyer]++;
+        passport.record(o.buyer, false, 0);
         o.asset.transferFrom(address(this), o.seller, o.tokenId);
         emit Defaulted(id);
     }

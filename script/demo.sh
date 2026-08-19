@@ -5,6 +5,7 @@
 #   sh script/demo.sh default <orderId> → assert default (needs attested height > deadline + GRACE)
 #   sh script/demo.sh finalize <orderId>
 #   sh script/demo.sh show <orderId>
+#   sh script/demo.sh passport [addr]   → the buyer's credit passport (facts + deposit rule)
 set -eu
 . ./.env
 PK=$CREDITCOIN_WALLET_PRIVATE_KEY
@@ -22,11 +23,12 @@ order)
   # first deadline = next epoch boundary at least 2 epochs ahead of the current Sepolia head
   HEAD=$(cast block-number --rpc-url $SOURCE_CHAIN_RPC_URL)
   FIRST=$(( (HEAD / EPOCH + 2) * EPOCH ))
-  AMOUNTS="[40000000,20000000,20000000,20000000]"   # 40 + 3×20 tUSDC (6 decimals)
-  cast send $ESCROW_ADDRESS "createOrder(address,address,uint256,address,address,uint256[],uint64,uint64)" \
-    $BUYER $ASSET_ADDRESS $ID $ME $USDC_ADDRESS "$AMOUNTS" $FIRST $EPOCH $CC >/dev/null 2>&1
+  PRICE=${PRICE:-100000000}; N=${N:-4}               # 100 tUSDC in 4 installments; deposit sized by the buyer's passport
+  cast send $ESCROW_ADDRESS "createOrder(address,address,uint256,address,address,uint256,uint8,uint64,uint64)" \
+    $BUYER $ASSET_ADDRESS $ID $ME $USDC_ADDRESS $PRICE $N $FIRST $EPOCH $CC >/dev/null 2>&1
   OID=$(( $(cast call $ESCROW_ADDRESS "nextOrderId()(uint256)" --rpc-url $CREDITCOIN_RPC_URL) - 1 ))
-  echo "order $OID: asset #$ID escrowed, buyer $BUYER, deadlines $FIRST +k×$EPOCH (Sepolia height)";;
+  echo "order $OID: asset #$ID escrowed, buyer $BUYER, deadlines $FIRST +k×$EPOCH (Sepolia height)"
+  cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint256[]))" $OID --rpc-url $CREDITCOIN_RPC_URL | grep -o '\[[0-9 \[\]e.,]*\]$' | sed 's/^/  installments: /';;
 pay)
   OID=$2; N=$3
   AMT=$(cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint256[]))" $OID --rpc-url $CREDITCOIN_RPC_URL | tr -d '[]() ' | cut -d, -f$((14 + N)))
@@ -37,5 +39,7 @@ pay)
 default)  cast send $ESCROW_ADDRESS "declareDefault(uint256)" $2 $CC 2>&1 | grep -E "^status|^transactionHash|Error";;
 finalize) cast send $ESCROW_ADDRESS "finalizeDefault(uint256)" $2 $CC 2>&1 | grep -E "^status|^transactionHash|Error";;
 show)     cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint256[]))" $2 --rpc-url $CREDITCOIN_RPC_URL;;
-*) sed -n 2,8p "$0";;
+passport) P=$(cast call $ESCROW_ADDRESS "passport()(address)" --rpc-url $CREDITCOIN_RPC_URL); A=${2:-$ME}
+  echo "passport $P  records(honored,defaulted,volume)=$(cast call $P 'records(address)(uint32,uint32,uint128)' $A --rpc-url $CREDITCOIN_RPC_URL | tr '\n' ' ') depositBps=$(cast call $P 'depositBps(address)(uint16)' $A --rpc-url $CREDITCOIN_RPC_URL)";;
+*) sed -n 2,9p "$0";;
 esac
