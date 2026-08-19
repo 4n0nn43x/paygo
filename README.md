@@ -31,12 +31,13 @@ forge test
 
 | Contract | Chain | Address |
 |---|---|---|
-| PayGoRouter | Sepolia | `0xB4375c5CBe4f1395ff673574144e64A995d147C7` |
-| TestUSDC | Sepolia | `0x73B9dEAA040643c849D7adE5AEad1cF674013F34` |
-| PayGoEscrow (chainKey 1, grace 2000 ETH blocks, cure 240 CTC blocks) | Creditcoin CC3 | `0xB4375c5CBe4f1395ff673574144e64A995d147C7` |
-| DemoAsset | Creditcoin CC3 | `0x73B9dEAA040643c849D7adE5AEad1cF674013F34` |
+| PayGoRouter | Sepolia | `0x42D5880d5Aa7490D90eF6842478D9d8Aa6D71474` |
+| TestUSDC (permit + EIP-3009) | Sepolia | `0x278138aDe5bE8628fd81a5268Ff2C891FDbBE9F3` |
+| PayGoEscrow (chainKey 1, grace 2000, cure 240) | Creditcoin CC3 | `0x76148A747fCdD26819e0329a9633E24cBE2a53b4` |
+| DemoAsset | Creditcoin CC3 | `0xbEcf8967f7fCe9c4dB9CE47E4c97479A21033D75` |
+| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0xBB52fDa813AC1041a0c05d6049Da41d9797Ea767` |
 
-Same deployer nonce on both chains → same addresses; the escrow check `topics[1] == address(this)` still namespaces orders per deployment.
+v2 (post-audit) addresses. Same deployer nonce on both chains kept Router/Escrow aligned across the earlier deploy; the escrow check `topics[1] == address(this)` still namespaces orders per deployment.
 
 ## Demo (CLI)
 
