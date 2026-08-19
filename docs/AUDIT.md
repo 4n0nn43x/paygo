@@ -73,3 +73,11 @@ at 1000, dedup on `(orderId, installmentNo, from)`.
 ## WEB-3 — No SRI / no CSP — **FIXED**
 `integrity="sha384-…"` + `crossorigin` on the ethers CDN tag; CSP header on the served page pinning
 script to cdnjs, connect to the two RPCs, img to the QR host.
+
+## WEB-4 / demo — passport `volume` display inflated by CLI parse — **FIXED (harness)**
+The escrow correctly accepts `amount >= due`; the CreditPassport `volume` counter therefore records
+whatever was actually paid. A bug in `script/demo.sh pay` mis-parsed `cast`'s abbreviated output
+(`40000000 [4e7]` → `400000004e7`), so the CLI over-paid and inflated one testnet buyer's `volume`.
+Purely cosmetic — `depositBps` uses `honored`/`defaulted`, never `volume` — and fixed by parsing the
+amounts array robustly. The UI-driven flow always used the exact on-chain `amounts[i]` and was never
+affected.
