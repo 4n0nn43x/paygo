@@ -1,20 +1,10 @@
 {
- "fromBlock": 11524692,
- "pending": [
-  {
-   "hash": "0xc7d7bd6ff1dda7281523b84817f7c408f044eb08aca71e7ab14d0b8bbeafef14",
-   "height": 11524685
-  },
-  {
-   "hash": "0x6d4551bf2dea54699bb1f157f3a9979ff31701ef8b9a4f7c785620a0cf5d092d",
-   "height": 11524688
-  },
-  {
-   "hash": "0xf80dc80b9d326f57e93723d6a85ef8586eb8d2f1d2aa4f4de6cbb9b5ad144add",
-   "height": 11524691
-  }
- ],
+ "fromBlock": 11524740,
+ "pending": [],
  "done": [
-  "0x4fbb438d72e1bf708fdbe9fbbf439eedea1e100f40c6b2dbf016fae7c635ed4e"
+  "0x4fbb438d72e1bf708fdbe9fbbf439eedea1e100f40c6b2dbf016fae7c635ed4e",
+  "0xc7d7bd6ff1dda7281523b84817f7c408f044eb08aca71e7ab14d0b8bbeafef14",
+  "0x6d4551bf2dea54699bb1f157f3a9979ff31701ef8b9a4f7c785620a0cf5d092d",
+  "0xf80dc80b9d326f57e93723d6a85ef8586eb8d2f1d2aa4f4de6cbb9b5ad144add"
  ]
 }

@@ -52,3 +52,7 @@ sh script/demo.sh finalize 1    #        cure window passes → asset back to se
 | Scenario | Tx | Gas | Per installment |
 |---|---|---|---|
 | 1 fresh proof, first installment of order 1 | [`0x818e…2469`](https://explorer.cc3-testnet.creditcoin.network/tx/0x818e27e885c5c8ceb754231548728e7157f7043d82a99300bf7674fd66d92469) | 357 476 | 357 476 |
+| 3 proofs, one continuity proof (installments 1-3, order 1 → **Completed**, asset transferred to buyer) | [`0x8b12…7847`](https://explorer.cc3-testnet.creditcoin.network/tx/0x8b123684246c82263336be169f0b5830ebdfdf6a467801e69f9857adddc47847) | 528 416 | **176 139** (−51 %) |
+
+Order 1 lifecycle on chain: created → 4 installments paid on Sepolia → proven & settled (1 + 3) → Completed, `DemoAsset #1` now owned by the buyer, passport `honored = 4` → `depositBps = 1500`.
+Order 2 (deadline already past): `declareDefault` accepted against the ChainInfo attested height → `DefaultAsserted` → `finalizeDefault` after the cure window.
