@@ -67,6 +67,22 @@ header{position:absolute;top:0;left:0;right:0;z-index:30;padding:18px 0}
 .aurora .a1{width:52%;height:70%;left:50%;top:-16%;background:radial-gradient(circle,rgba(246,198,80,.65),transparent 66%);animation:drift1 22s var(--ease) infinite}
 .aurora .a2{width:44%;height:60%;left:-10%;top:44%;background:radial-gradient(circle,rgba(255,214,120,.4),transparent 70%);animation:drift2 27s var(--ease) infinite}
 .aurora .a3{width:34%;height:46%;left:64%;top:52%;background:radial-gradient(circle,rgba(120,150,230,.16),transparent 72%);animation:drift1 30s var(--ease) infinite reverse}
+/* cinematic floating gold coins — each coin = a proof (evokes the reference product renders) */
+.coins{position:absolute;inset:0;z-index:2;pointer-events:none;perspective:1100px}
+.coin{position:absolute;width:var(--s);height:var(--s);transform-style:preserve-3d;opacity:var(--o,.85);filter:blur(var(--bl,0px));
+  animation:coinBob var(--d,9s) ease-in-out infinite;animation-delay:var(--dl,0s);will-change:transform}
+.coin .disc{position:absolute;inset:0;border-radius:50%;transform-style:preserve-3d;
+  animation:coinSpin var(--sp,7s) linear infinite;animation-delay:var(--dl,0s);will-change:transform}
+.coin .disc::before{content:"";position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(62% 55% at 36% 30%,#FFF3CE,#F6C650 42%,#E9A21A 72%,#B27412 100%);
+  box-shadow:inset 0 2px 5px rgba(255,255,255,.65),inset 0 -4px 8px rgba(120,70,10,.5),0 8px 22px rgba(180,120,20,.28);
+  border:1px solid rgba(150,100,20,.45)}
+.coin .disc::after{content:"";position:absolute;inset:24%;border-radius:50%;border:1.5px solid rgba(255,244,210,.55);
+  box-shadow:inset 0 0 6px rgba(120,70,10,.35)}
+@keyframes coinBob{0%,100%{transform:translateY(0) rotateX(64deg)}50%{transform:translateY(-26px) rotateX(64deg)}}
+@keyframes coinSpin{to{transform:rotateY(360deg)}}
+@media(max-width:980px){.coins .lg{display:none}}
+@media(prefers-reduced-motion:reduce){.coins{display:none}}
 .hero-card .mesh{position:absolute;inset:0;z-index:1;opacity:.4;pointer-events:none;
   background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
   background-size:56px 56px;mask-image:radial-gradient(90% 80% at 15% 92%,#000,transparent 70%)}
@@ -242,6 +258,15 @@ footer{padding:56px 0 46px}
   <div class="wrap">
     <div class="hero-card">
       <div class="aurora"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+      <div class="coins" aria-hidden="true">
+        <span class="coin lg" style="--s:88px;top:9%;left:57%;--d:10s;--sp:7s;--dl:0s;--o:.9"><span class="disc"></span></span>
+        <span class="coin" style="--s:54px;top:30%;left:88%;--d:8.5s;--sp:6s;--dl:.6s;--o:.85;--bl:.5px"><span class="disc"></span></span>
+        <span class="coin lg" style="--s:66px;top:60%;left:52%;--d:11s;--sp:8s;--dl:1.2s;--o:.8"><span class="disc"></span></span>
+        <span class="coin" style="--s:40px;top:74%;left:82%;--d:9s;--sp:5.5s;--dl:.3s;--o:.7;--bl:1px"><span class="disc"></span></span>
+        <span class="coin" style="--s:34px;top:20%;left:74%;--d:12s;--sp:9s;--dl:2s;--o:.55;--bl:1.5px"><span class="disc"></span></span>
+        <span class="coin lg" style="--s:48px;top:82%;left:64%;--d:9.5s;--sp:6.5s;--dl:1.6s;--o:.75"><span class="disc"></span></span>
+        <span class="coin" style="--s:28px;top:46%;left:93%;--d:10.5s;--sp:7.5s;--dl:.9s;--o:.5;--bl:2px"><span class="disc"></span></span>
+      </div>
       <div class="mesh"></div>
       <div class="hero-in">
         <div>
