@@ -143,7 +143,7 @@ createServer((req, res) => {
   }
   if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
     res.writeHead(200, { 'content-type': 'text/html', 'x-content-type-options': 'nosniff',
-      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src https://api.qrserver.com; style-src 'unsafe-inline'" });
+      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src https://api.qrserver.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com" });
     return res.end(readFileSync('web/index.html'));
   }
   res.writeHead(404); res.end();
