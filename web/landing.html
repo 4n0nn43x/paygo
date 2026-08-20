@@ -67,22 +67,6 @@ header{position:absolute;top:0;left:0;right:0;z-index:30;padding:18px 0}
 .aurora .a1{width:52%;height:70%;left:50%;top:-16%;background:radial-gradient(circle,rgba(246,198,80,.65),transparent 66%);animation:drift1 22s var(--ease) infinite}
 .aurora .a2{width:44%;height:60%;left:-10%;top:44%;background:radial-gradient(circle,rgba(255,214,120,.4),transparent 70%);animation:drift2 27s var(--ease) infinite}
 .aurora .a3{width:34%;height:46%;left:64%;top:52%;background:radial-gradient(circle,rgba(120,150,230,.16),transparent 72%);animation:drift1 30s var(--ease) infinite reverse}
-/* cinematic floating gold coins — each coin = a proof (evokes the reference product renders) */
-.coins{position:absolute;inset:0;z-index:2;pointer-events:none;perspective:1100px}
-.coin{position:absolute;width:var(--s);height:var(--s);transform-style:preserve-3d;opacity:var(--o,.85);filter:blur(var(--bl,0px));
-  animation:coinBob var(--d,9s) ease-in-out infinite;animation-delay:var(--dl,0s);will-change:transform}
-.coin .disc{position:absolute;inset:0;border-radius:50%;transform-style:preserve-3d;
-  animation:coinSpin var(--sp,7s) linear infinite;animation-delay:var(--dl,0s);will-change:transform}
-.coin .disc::before{content:"";position:absolute;inset:0;border-radius:50%;
-  background:radial-gradient(62% 55% at 36% 30%,#FFF3CE,#F6C650 42%,#E9A21A 72%,#B27412 100%);
-  box-shadow:inset 0 2px 5px rgba(255,255,255,.65),inset 0 -4px 8px rgba(120,70,10,.5),0 8px 22px rgba(180,120,20,.28);
-  border:1px solid rgba(150,100,20,.45)}
-.coin .disc::after{content:"";position:absolute;inset:24%;border-radius:50%;border:1.5px solid rgba(255,244,210,.55);
-  box-shadow:inset 0 0 6px rgba(120,70,10,.35)}
-@keyframes coinBob{0%,100%{transform:translateY(0) rotateX(64deg)}50%{transform:translateY(-26px) rotateX(64deg)}}
-@keyframes coinSpin{to{transform:rotateY(360deg)}}
-@media(max-width:980px){.coins .lg{display:none}}
-@media(prefers-reduced-motion:reduce){.coins{display:none}}
 .hero-card .mesh{position:absolute;inset:0;z-index:1;opacity:.4;pointer-events:none;
   background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
   background-size:56px 56px;mask-image:radial-gradient(90% 80% at 15% 92%,#000,transparent 70%)}
@@ -97,33 +81,37 @@ header{position:absolute;top:0;left:0;right:0;z-index:30;padding:18px 0}
 .mq-track span{white-space:nowrap;color:var(--ink-55);font-size:13px}
 @media(max-width:980px){.hero{min-height:auto}.hero-in{grid-template-columns:1fr;padding:36px 26px 210px}.hero .wrap{padding-top:96px}.hero-brands{max-width:calc(100% - 52px)}}
 
-/* signature glass schedule */
-.sched{position:relative;padding:22px;border-radius:22px;
-  background:rgba(255,255,255,.5);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);
-  border:1px solid rgba(255,255,255,.85);box-shadow:0 30px 70px rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.9);
-  animation:floaty 7s ease-in-out infinite;will-change:transform}
-.sched-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-.sched-title{font-family:var(--head);font-weight:600;font-size:15px}
-.tag{position:relative;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--gold);
-  border:1px solid rgba(233,162,26,.5);border-radius:999px;padding:4px 10px 4px 20px}
-.tag::before{content:"";position:absolute;left:9px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px var(--gold);animation:pulse 1.8s ease-in-out infinite}
-.row{position:relative;overflow:hidden;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:14px 13px;border-radius:14px;
-  border:1px solid transparent;transition:background .5s var(--ease),border-color .5s,opacity .5s;opacity:.5}
-.row .no{font-family:var(--mono);font-size:12px;color:var(--ink-40);width:24px;transition:color .5s}
-.row .amt{font-family:var(--mono);font-size:14px;color:var(--ink-70);transition:color .5s}
-.row .st{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-40);font-weight:500}
-.row .led{width:9px;height:9px;border-radius:50%;background:rgba(11,11,15,.18);transition:all .5s}
-.row .sweep{position:absolute;inset:0;pointer-events:none;transform:translateX(-130%);
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.7),transparent)}
-.row.lit{opacity:1;background:linear-gradient(90deg,rgba(233,162,26,.2),rgba(233,162,26,.08));border-color:rgba(233,162,26,.55)}
-.row.lit .no{color:#B37908}.row.lit .amt{color:var(--ink);font-weight:500}
-.row.lit .st{color:#966200;font-weight:600}
-.row.lit .led{width:10px;height:10px;background:var(--gold);box-shadow:0 0 4px var(--gold),0 0 14px var(--gold)}
-.row.lit .sweep{animation:sweep .95s var(--ease)}
-.row.lit .st{animation:pop .5s var(--ease)}
-.sched-foot{display:flex;gap:9px;margin-top:13px;font-size:12px;color:var(--ink-70);line-height:1.4}
-.sched-foot svg{color:var(--gold);flex-shrink:0}
-@media(max-width:980px){.sched{max-width:460px}}
+/* hero product illustration: payment on Ethereum → proof → escrow on Creditcoin */
+.flow{position:relative;z-index:3;display:flex;flex-direction:column;width:100%;max-width:410px;margin-left:auto}
+.node{position:relative;border-radius:18px;padding:18px 20px;background:rgba(255,255,255,.6);
+  backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);
+  border:1px solid rgba(255,255,255,.85);box-shadow:0 22px 50px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.9)}
+.node-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+.node .chain{font-family:var(--mono);font-size:11px;letter-spacing:.11em;color:var(--ink-55)}
+.node .badge{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ink-55)}
+.node .ccbadge{color:#966200;border-color:rgba(233,162,26,.45);background:rgba(233,162,26,.1)}
+.diamond{width:24px;height:24px;transform:rotate(45deg);border-radius:6px;background:linear-gradient(135deg,#93A6CC,#495B86);box-shadow:inset 0 1px 2px rgba(255,255,255,.45),0 2px 6px rgba(60,80,130,.3)}
+.row2{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-size:13.5px;color:var(--ink-70)}
+.row2 b{color:var(--ink);font-weight:600}
+.row2.sub{font-size:11px;color:var(--ink-40);margin-top:9px;line-height:1.4}
+.row2 .ic{width:30px;height:30px;flex:none;border-radius:9px;display:grid;place-items:center;background:rgba(11,11,15,.05);border:1px solid var(--line);color:var(--ink-70)}
+.node.cc .row2 .ic{background:rgba(233,162,26,.14);border-color:rgba(233,162,26,.32);color:#966200}
+.beam{position:relative;height:98px;width:100%}
+.beam .rail{position:absolute;left:50%;top:6px;bottom:6px;width:2px;margin-left:-1px;border-radius:2px;overflow:hidden;
+  background:linear-gradient(180deg,rgba(233,162,26,.12),rgba(233,162,26,.55),rgba(233,162,26,.12))}
+.beam .rail::before{content:"";position:absolute;left:-1px;right:-1px;top:-10px;bottom:-10px;
+  background:repeating-linear-gradient(180deg,transparent 0 6px,rgba(255,255,255,.75) 6px 10px);animation:flow 1.3s linear infinite;will-change:transform}
+.beam .coin{position:absolute;left:50%;width:20px;height:20px;margin-left:-10px;border-radius:50%;z-index:2;
+  background:radial-gradient(60% 55% at 38% 32%,#FFF3CE,#F6C650 44%,#E9A21A 74%,#B27412 100%);
+  box-shadow:0 0 14px rgba(233,162,26,.85),inset 0 1px 2px rgba(255,255,255,.6);animation:travel 3s ease-in-out infinite;will-change:top,opacity}
+.beam .lab{position:absolute;left:calc(50% + 22px);top:50%;transform:translateY(-50%);white-space:nowrap;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;color:#966200;display:flex;align-items:center;gap:6px}
+.mini{display:flex;gap:8px;margin-top:14px}
+.mini i{flex:1;height:7px;border-radius:999px;background:rgba(11,11,15,.1);transition:background .45s var(--ease),box-shadow .45s}
+.mini i.on{background:var(--gold);box-shadow:0 0 9px rgba(233,162,26,.8)}
+@keyframes flow{to{transform:translateY(10px)}}
+@keyframes travel{0%{top:-4px;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:82px;opacity:0}}
+@media(max-width:980px){.flow{max-width:440px;margin:0 auto}}
 
 /* sections */
 section{padding:clamp(70px,9vw,116px) 0}
@@ -258,15 +246,6 @@ footer{padding:56px 0 46px}
   <div class="wrap">
     <div class="hero-card">
       <div class="aurora"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
-      <div class="coins" aria-hidden="true">
-        <span class="coin lg" style="--s:88px;top:9%;left:57%;--d:10s;--sp:7s;--dl:0s;--o:.9"><span class="disc"></span></span>
-        <span class="coin" style="--s:54px;top:30%;left:88%;--d:8.5s;--sp:6s;--dl:.6s;--o:.85;--bl:.5px"><span class="disc"></span></span>
-        <span class="coin lg" style="--s:66px;top:60%;left:52%;--d:11s;--sp:8s;--dl:1.2s;--o:.8"><span class="disc"></span></span>
-        <span class="coin" style="--s:40px;top:74%;left:82%;--d:9s;--sp:5.5s;--dl:.3s;--o:.7;--bl:1px"><span class="disc"></span></span>
-        <span class="coin" style="--s:34px;top:20%;left:74%;--d:12s;--sp:9s;--dl:2s;--o:.55;--bl:1.5px"><span class="disc"></span></span>
-        <span class="coin lg" style="--s:48px;top:82%;left:64%;--d:9.5s;--sp:6.5s;--dl:1.6s;--o:.75"><span class="disc"></span></span>
-        <span class="coin" style="--s:28px;top:46%;left:93%;--d:10.5s;--sp:7.5s;--dl:.9s;--o:.5;--bl:2px"><span class="disc"></span></span>
-      </div>
       <div class="mesh"></div>
       <div class="hero-in">
         <div>
@@ -277,13 +256,23 @@ footer{padding:56px 0 46px}
             <a class="btn btn-cream btn-sm" href="#acts">90-sec demo</a>
           </div>
         </div>
-        <div class="sched" id="sched" aria-label="Payment schedule; each row lights when its payment is proven on-chain">
-          <div class="sched-head"><span class="sched-title">Order #128 · escrowed asset</span><span class="tag">live</span></div>
-          <div class="row" data-i="0"><span class="sweep"></span><span class="no">01</span><span class="amt">40.00 USDC · deposit</span><span class="st"><span class="led"></span><span class="lbl">due</span></span></div>
-          <div class="row" data-i="1"><span class="sweep"></span><span class="no">02</span><span class="amt">20.00 USDC</span><span class="st"><span class="led"></span><span class="lbl">due</span></span></div>
-          <div class="row" data-i="2"><span class="sweep"></span><span class="no">03</span><span class="amt">20.00 USDC</span><span class="st"><span class="led"></span><span class="lbl">due</span></span></div>
-          <div class="row" data-i="3"><span class="sweep"></span><span class="no">04</span><span class="amt">20.00 USDC</span><span class="st"><span class="led"></span><span class="lbl">due</span></span></div>
-          <div class="sched-foot"><svg class="i" viewBox="0 0 24 24" style="width:16px"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>Each row lights the moment its Ethereum payment is proven on Creditcoin. Last one proven → the asset is released.</div>
+        <div class="flow" aria-label="A payment on Ethereum, proven by Attestcoin, settles on Creditcoin">
+          <div class="node">
+            <div class="node-h"><span class="chain">ETHEREUM · SEPOLIA</span><span class="diamond"></span></div>
+            <div class="row2"><span class="ic"><svg class="i" viewBox="0 0 24 24" style="width:16px"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span> payInstallment · <b>20.00 USDC</b></div>
+            <div class="row2 sub">emits InstallmentPaid</div>
+          </div>
+          <div class="beam">
+            <div class="rail"></div>
+            <div class="coin"></div>
+            <div class="lab"><svg class="i" viewBox="0 0 24 24" style="width:13px"><path d="M12 3l7 4v5c0 4-3 7-7 9-4-2-7-5-7-9V7z"/><path d="M9 12l2 2 4-4"/></svg>Attestcoin · inclusion proof</div>
+          </div>
+          <div class="node cc">
+            <div class="node-h"><span class="chain">CREDITCOIN · CC3</span><span class="badge ccbadge">escrow</span></div>
+            <div class="row2"><span class="ic"><svg class="i" viewBox="0 0 24 24" style="width:16px"><rect x="4" y="9" width="16" height="11" rx="2"/><path d="M8 9V6a4 4 0 018 0v3"/></svg></span> Asset #128 · <b>locked</b></div>
+            <div class="mini" id="mini"><i></i><i></i><i></i><i></i></div>
+            <div class="row2 sub">each proof advances the schedule → the asset releases on the last</div>
+          </div>
         </div>
       </div>
       <div class="hero-brands">
@@ -394,12 +383,16 @@ footer{padding:56px 0 46px}
 
 <script>
 var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
-// schedule lights up sequentially, with proof sweep
+// hero illustration: the mini-schedule advances each time the proof coin lands (synced to the 3s travel)
 (function(){
-  var s=document.getElementById('sched'); if(!s)return;
-  var rows=[].slice.call(s.querySelectorAll('.row')),seen=false;
-  function light(){rows.forEach(function(r,i){setTimeout(function(){r.classList.add('lit');var l=r.querySelector('.lbl');if(l)l.textContent='proven ✓';},reduce?0:520+i*680);});}
-  new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting&&!seen){seen=true;light();}});},{threshold:.5}).observe(s);
+  var mini=document.getElementById('mini'); if(!mini)return;
+  var dots=[].slice.call(mini.children);
+  if(reduce){dots.forEach(function(d){d.classList.add('on');});return;}
+  var k=0;
+  setInterval(function(){
+    if(k>=dots.length){dots.forEach(function(d){d.classList.remove('on');});k=0;return;}
+    dots[k++].classList.add('on');
+  },3000);
 })();
 // reveal + stagger on scroll
 (function(){
