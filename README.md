@@ -18,6 +18,7 @@
 | `test/` | — | 22 tests: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture |
 | `worker/settle.ts` | — | convenience relayer: autopay pre-signed authorizations + listen → wait attested → batch proof → `settle`; serves the checkout UI |
 | `web/index.html` | — | single-page checkout: seller listing, 1-click deposit, sign-once autopay, live tracker, passport |
+| `web/landing.html` | — | marketing landing — self-contained (open directly): hero with a schedule that lights up as each payment is proven, mechanism, measured proof, the 3 acts |
 | `docs/` | — | `DEMO.md` (3-act stage script), `SUBMISSION.md` (technical submission), `AUDIT.md` |
 
 ## Run
