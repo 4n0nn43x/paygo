@@ -5,3 +5,4 @@ broadcast/
 .env
 *.log
 worker/state.json
+web/dist/

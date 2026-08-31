@@ -35,7 +35,54 @@ contract TestUSDC is ERC20Permit {
     }
 }
 
+/// @dev `mint` is unchanged (every existing caller keeps working); `mintWithMeta` is additive —
+///      real on-chain tokenURI metadata (name/description/image), the same on-chain JSON data-URI
+///      pattern CreditPassport/SellerPassport already use. A tokenized asset a buyer can only see as
+///      "Asset #128" isn't really tokenization; this is what a seller listing a real item needs.
 contract DemoAsset is ERC721("PayGo Demo Asset", "PGA") {
+    struct Meta { string name; string description; string image; }
     uint256 public next = 1;
+    mapping(uint256 => Meta) public meta;
+
     function mint(address to) external returns (uint256 id) { id = next++; _mint(to, id); }
+
+    function mintWithMeta(address to, string calldata name_, string calldata description, string calldata image)
+        external returns (uint256 id)
+    {
+        id = next++;
+        meta[id] = Meta(name_, description, image);
+        _mint(to, id);
+    }
+
+    function tokenURI(uint256 id) public view override returns (string memory) {
+        _requireOwned(id);
+        Meta storage m = meta[id];
+        if (bytes(m.name).length == 0) {
+            return string.concat('data:application/json,{"name":"PayGo Demo Asset #', _u(id),
+                '","description":"Demo escrowed asset (no image set)."}');
+        }
+        return string.concat('data:application/json,{"name":"', _esc(m.name), '","description":"', _esc(m.description),
+            '","image":"', _esc(m.image), '"}');
+    }
+
+    function _u(uint256 v) private pure returns (string memory s) {
+        if (v == 0) return "0";
+        bytes memory b; while (v > 0) { b = abi.encodePacked(uint8(48 + v % 10), b); v /= 10; } return string(b);
+    }
+
+    /// @dev Minimal JSON-string escaping for attacker-controlled input (unlike CreditPassport's tokenURI,
+    ///      whose fields are plain integers) — quotes and backslashes would otherwise break out of the
+    ///      surrounding JSON string. Informational metadata only; nothing in the escrow reads it.
+    function _esc(string memory s) private pure returns (string memory) {
+        bytes memory b = bytes(s);
+        bytes memory out = new bytes(b.length * 2);
+        uint256 j;
+        for (uint256 i; i < b.length; i++) {
+            if (b[i] == '"' || b[i] == "\\") out[j++] = "\\";
+            out[j++] = b[i];
+        }
+        bytes memory trimmed = new bytes(j);
+        for (uint256 k; k < j; k++) trimmed[k] = out[k];
+        return string(trimmed);
+    }
 }

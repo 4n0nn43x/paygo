@@ -5,6 +5,7 @@
   "description": "PayGo — trustless cross-chain hire-purchase on Creditcoin (BUIDL CTC 2026 Fall)",
   "scripts": {
     "build": "forge build",
+    "build:web": "cd web/app && npm install && npm run build",
     "test": "forge test",
     "worker": "tsx worker/settle.ts"
   },

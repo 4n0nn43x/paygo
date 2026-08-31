@@ -4,12 +4,14 @@
 //   2. settle:  listen InstallmentPaid on Sepolia → wait until attested → one batch proof per ≤10 txs /
 //               ≤1000-block window → PayGoEscrow.settle on Creditcoin
 //   3. settleCustody: same shape, for CustodyRouter's PossessionAttested (Proof-of-Custody chip scans)
-//   4. serves web/index.html + a tiny JSON API (POST /authorizations, GET /state) for the checkout
+//   4. serves the built web/dist (Vite: web/app -> landing at /, dashboard at /dashboard/) + a tiny
+//      JSON API (POST /authorizations, GET /state) for the checkout
 import 'dotenv/config';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { proofProvider } from '@gluwa/usc-sdk';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { extname, join, resolve } from 'node:path';
 
 const env = (k: string) => { const v = process.env[k]; if (!v) throw new Error(`missing env ${k}`); return v; };
 const CHAIN_KEY = Number(env('SOURCE_CHAIN_KEY'));
@@ -166,7 +168,25 @@ async function custodySettleLoop() {
   }
 }
 
-// ---- 4. checkout UI + API
+// ---- 4. checkout UI (Vite build in web/dist) + API
+const WEB_DIST = resolve('web/dist');
+const MIME: Record<string, string> = {
+  '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.json': 'application/json',
+};
+function mimeType(file: string) { return MIME[extname(file)] ?? 'application/octet-stream'; }
+
+/** Resolves a request path to a file under web/dist, or null. Multi-page: / -> index.html,
+ *  /dashboard or /dashboard/ -> dashboard/index.html, everything else must be a real asset file. */
+function staticFilePath(url: string): string | null {
+  const path = url.split('?')[0];
+  if (path === '/') return join(WEB_DIST, 'index.html');
+  if (path === '/dashboard' || path === '/dashboard/') return join(WEB_DIST, 'dashboard', 'index.html');
+  const candidate = resolve(join(WEB_DIST, path));
+  if (!candidate.startsWith(WEB_DIST + '/')) return null; // path traversal guard
+  try { return statSync(candidate).isFile() ? candidate : null; } catch { return null; }
+}
 createServer((req, res) => {
   const json = (code: number, body: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   if (req.method === 'GET' && req.url === '/state') return json(200, {
@@ -203,10 +223,16 @@ createServer((req, res) => {
     });
     return;
   }
-  if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-    res.writeHead(200, { 'content-type': 'text/html', 'x-content-type-options': 'nosniff',
-      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src https://api.qrserver.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com" });
-    return res.end(readFileSync('web/index.html'));
+  if (req.method === 'GET') {
+    // Vite build (web/app -> web/dist): landing at /, dashboard at /dashboard/, hashed assets in
+    // between. No inline script/style anymore (ethers is bundled, not CDN-loaded), so CSP drops
+    // 'unsafe-inline' entirely — a tightening, not a relaxation, of the pre-migration policy.
+    const csp = "default-src 'none'; script-src 'self'; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src 'self' https://api.qrserver.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com";
+    const file = staticFilePath(req.url ?? '/');
+    if (file) {
+      res.writeHead(200, { 'content-type': mimeType(file), 'x-content-type-options': 'nosniff', 'content-security-policy': csp });
+      return res.end(readFileSync(file));
+    }
   }
   res.writeHead(404); res.end();
 }).listen(PORT, () => console.log(`checkout UI + API on http://localhost:${PORT}`));

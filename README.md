@@ -19,8 +19,7 @@
 | `contracts/Demo.sol` | — | `TestUSDC` (permit + EIP-3009), `DemoAsset` |
 | `test/` | — | 36 tests: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture, asset allowlist + pull-pattern, Proof-of-Custody (match/mismatch/timeout) |
 | `worker/settle.ts` | — | convenience relayer: autopay pre-signed authorizations + listen → wait attested → batch proof → `settle` / `settleCustody`; serves the checkout UI |
-| `web/index.html` | — | single-page checkout: seller listing (+ custody bond), 1-click deposit, sign-once autopay, live tracker, passport, Proof-of-Custody chip attestation |
-| `web/landing.html` | — | marketing landing — self-contained (open directly): hero with a schedule that lights up as each payment is proven, mechanism, measured proof, the 3 acts |
+| `web/app/` | — | Vite + React + TypeScript source. Two entries, built to `web/dist/` (`npm run build:web`, gitignored, served by the worker): landing (`/`) and the checkout dashboard (`/dashboard/` — seller listing + custody bond, 1-click deposit, sign-once autopay, live tracker, passport, Proof-of-Custody chip attestation). No router — two static Vite build inputs, same shape as the two HTML files this replaced |
 | `docs/` | — | `DEMO.md` (stage script), `SUBMISSION.md` (technical submission), `AUDIT.md`; see also [`../docs/08-proof-of-custody.md`](../docs/08-proof-of-custody.md) for the full Proof-of-Custody spec |
 
 ## Run
@@ -28,28 +27,32 @@
 ```sh
 npm i
 forge test
+npm run build:web   # builds web/app -> web/dist, served by the worker at / (landing) and /dashboard/ (checkout)
 ```
 
 ## Deployed (CC3 testnet / Sepolia, 2026-08-31)
 
 | Contract | Chain | Address |
 |---|---|---|
-| PayGoRouter | Sepolia | `0x413619C8ed9806619622BcDDf272505e29D563b1` |
-| CustodyRouter | Sepolia | `0xeAaD89dE2E8417810BbcCb532d8aed39969CdAfc` |
-| TestUSDC (permit + EIP-3009) | Sepolia | `0xE049C2213107C95BaF0517B6bbb805464371006B` |
-| PayGoEscrow (chainKey 1, grace 2000, cure 240, custody window 240) | Creditcoin CC3 | `0x799b0510Df104159eeEbd280DA0EAD45DE9E08CB` |
-| DemoAsset | Creditcoin CC3 | `0x3473bD97b976B4e5F76f25328881D08e257A6e57` |
-| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x795e97D5B839060a8A5514662F23A9B39C567981` |
-| SellerPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x5a46703cF8053d8854F45314dbf7366393847F1A` |
+| PayGoRouter | Sepolia | `0x912Fd5a73AA2d1b56f14F2e8B1cC17F2Cfc7327F` |
+| CustodyRouter | Sepolia | `0x9AFa2dFAe36380D45524a0Fd520FeB806CAE38c5` |
+| TestUSDC (permit + EIP-3009) | Sepolia | `0x3b332374E1F564b57d3A6f7dDe33e13030BD8895` |
+| PayGoEscrow (chainKey 1, grace 2000, cure 240, custody window 240) | Creditcoin CC3 | `0xD0B9c4c67c542e18B7EA556BbbAE3E0Eb2637878` |
+| DemoAsset (mint + mintWithMeta, real tokenURI) | Creditcoin CC3 | `0xCAb49452967b2d9671cB75BFb947E715B0B6cFB1` |
+| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x675d81526DF8ae5F7654F0949B8Cf7Ea6Aa668A3` |
+| SellerPassport (auto-deployed by escrow) | Creditcoin CC3 | `0xA30C9538C168CB6A54908E31E52BeB9Ec4930aD4` |
 
-**v3** — post-security-pass redeploy. Includes the asset/payToken allowlists, the pull-pattern
-`claimAsset`/`withdrawAsset`/`withdrawBond`+`claimBond` split, Proof-of-Custody
-(`CustodyRouter`/`SellerPassport`), and the three `audit/findings/` fixes (see `docs/AUDIT.md`).
-Verified on-chain post-deploy: constructor immutables, both new allowlists (`DemoAsset`/`TestUSDC`
-present), and the two child passport contracts all read back correctly. Same deployer nonce ordering
-(Router/CustodyRouter/TestUSDC on Sepolia, then DemoAsset/Escrow on Creditcoin) as prior deploys; the
-escrow check `topics[1] == address(this)` still namespaces orders per deployment — v1/v2 orders (if any
-were left mid-lifecycle) do not carry over to v3's contract state.
+**v4** — adds real on-chain tokenURI metadata to `DemoAsset` (`mintWithMeta`: name/description/image,
+JSON-escaped; plain `mint` unchanged, zero breaking change to any existing caller). Everything from v3
+(post-security-pass: asset/payToken allowlists, the pull-pattern `claimAsset`/`withdrawAsset`/
+`withdrawBond`+`claimBond` split, Proof-of-Custody, the three `audit/findings/` fixes — see
+`docs/AUDIT.md`) carries forward unchanged.
+Verified on-chain post-deploy: constructor immutables, both allowlists, the two child passport
+contracts, and `DemoAsset`'s new `tokenURI` (correctly reverts `ERC721NonexistentToken` for an unminted
+id — matches `test/DemoAsset.t.sol`). Same deployer nonce ordering (Router/CustodyRouter/TestUSDC on
+Sepolia, then DemoAsset/Escrow on Creditcoin) as prior deploys; the escrow check
+`topics[1] == address(this)` still namespaces orders per deployment — orders from earlier deployments
+do not carry over to v4's contract state.
 
 ## Demo (CLI)
 
