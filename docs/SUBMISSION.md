@@ -60,13 +60,29 @@ All deadlines are `firstDeadline + k·interval` with both multiples of `EPOCH = 
 | 3 proofs, 1 continuity proof | 528 416 → 176 139 each (−51 %) |
 | precompile `verify` fresh / +6 h / +24 h / +7 d | 43 748 / 85 665 / 84 284 / 86 127 (×2, then flat) |
 
+## Proof-of-Custody: the real↔tokenized link (new)
+Attestcoin proves *who paid*, never *what the token represents*. Proof-of-Custody closes that gap the
+same way the payment side works: two positive proofs, no jury for the common case. A chip embedded in
+the physical asset (EIP-5791 "Physical Backed Token" pattern — a self-generated secp256k1 keypair)
+signs a challenge at listing (`role=Origin`) and again at handoff (`role=Delivery`), both proven
+cross-chain through the identical `settle`-style pipeline (nullifier, `verifyAndEmit`, receiptStatus,
+emitter filter, fields) via a new `CustodyRouter.sol` on Sepolia and `PayGoEscrow.settleCustody`. Same
+chip both times = cryptographic proof of no substitution, bond returns to the seller; different chip =
+cryptographic proof of substitution, the seller's bond is slashed to the buyer automatically. The bond
+is a flat, seller-chosen CTC stake — deliberately **not** a percentage of `price`, since that would
+need a CTC/payToken price oracle and reintroduce exactly the oracle dependency PayGo avoids elsewhere.
+A `SellerPassport` (ERC-5192, mirrors `CreditPassport`) waives the bond after 4 chip-matched deliveries
+with zero proven mismatches. Full spec: `../docs/08-proof-of-custody.md`. Implemented and tested
+(`test/CustodyRouter.t.sol`, `test_custody_*` in `test/PayGoEscrow.t.sol`); not yet independently
+security-reviewed (see `AUDIT.md`) and not yet redeployed to testnet.
+
 ## Setup
 ```sh
 npm i && forge test                       # 22 unit tests (precompiles mocked via vm.etch) + real-proof decode fixture
 cp .env.example .env                      # key + RPCs
 sh script/deploy.sh                       # Sepolia: Router, TestUSDC · CC3: Escrow(+Passport), DemoAsset — note --libraries EvmV1Decoder
 npm run worker                            # relayer + autopay + checkout UI at http://localhost:8787
-sh script/demo.sh order|pay|default|finalize|show|passport
+sh script/demo.sh order|pay|default|finalize|claim|withdraw|show|passport|attest-origin|attest-delivery|bond|withdraw-bond|claim-bond
 node script/gas-probe.mjs                 # freshness table
 ```
 Versions pinned: `@gluwa/usc-sdk@0.18.0`, `@gluwa/usc-contracts@0.1.2`, solc 0.8.30, EvmV1Decoder testnet lib `0x731c345d79Fb8BbDC541f9DF3b6317585F849F9f`, chainKey Sepolia = 1 (CC3 testnet; mainnet differs — constant per env).

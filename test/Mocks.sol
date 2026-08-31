@@ -1,7 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {INativeQueryVerifier, IChainInfo} from "../contracts/Attestcoin.sol";
+
+/// @dev A contract with no `receive`/payable `fallback` — stands in for the class of recipient
+///      (bespoke multisig, vault, minimal account contract) that can never accept a bare `.call{value}`.
+contract NonPayable {}
+
+/// @dev An asset that accepts exactly one transfer (the deposit leg, seller → escrow, at createOrder)
+///      then always reverts — simulates a buggy/hostile seller-supplied ERC-721. Used to prove
+///      `claimAsset`/`withdrawAsset` isolate that failure from `settle`/`finalizeDefault`.
+contract HostileAsset is ERC721("Hostile", "BAD") {
+    uint256 public next = 1;
+    bool depositedOnce;
+    function mint(address to) external returns (uint256 id) { id = next++; _mint(to, id); }
+    function transferFrom(address from, address to, uint256 id) public override {
+        require(!depositedOnce, "gotcha: release leg reverts");
+        depositedOnce = true;
+        super.transferFrom(from, to, id);
+    }
+}
 
 /// @dev Etched at 0x…0FD2 in tests. txIndex is smuggled in merkleProof.root so tests control nullifiers.
 contract MockVerifier {

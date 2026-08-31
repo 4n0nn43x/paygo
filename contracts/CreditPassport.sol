@@ -6,7 +6,11 @@ pragma solidity ^0.8.23;
 ///         written by PayGoEscrow, and read back by PayGoEscrow itself to size the next deposit.
 ///         One token per address, tokenId = uint160(owner), minted on first fact, never transferable.
 contract CreditPassport {
-    struct Record { uint32 honored; uint32 defaulted; uint128 volume; }
+    /// @dev `volume` is `uint256`, not a narrower type: it's purely informational (never gates
+    ///      `depositBps`), and a narrower type invites exactly the truncating-cast-then-overflow DoS a
+    ///      security pass found here (SC-AUDIT-01) — `amount` is attacker-controlled ERC20 input with no
+    ///      protocol-level ceiling, so any fixed-width accumulator is a griefing vector, not just uint128.
+    struct Record { uint32 honored; uint32 defaulted; uint256 volume; }
 
     address public immutable escrow;
     mapping(address => Record) public records;
@@ -21,7 +25,7 @@ contract CreditPassport {
         require(msg.sender == escrow, "escrow only");
         Record storage r = records[buyer];
         if (r.honored + r.defaulted == 0) { emit Transfer(address(0), buyer, uint160(buyer)); emit Locked(uint160(buyer)); }
-        if (ok) { r.honored++; r.volume += uint128(amount); } else r.defaulted++;
+        if (ok) { r.honored++; r.volume += amount; } else r.defaulted++;
         emit Fact(buyer, ok, amount);
     }
 

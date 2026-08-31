@@ -7,7 +7,7 @@ import {INativeQueryVerifier} from "../contracts/Attestcoin.sol";
 import {PayGoEscrow} from "../contracts/PayGoEscrow.sol";
 import {CreditPassport} from "../contracts/CreditPassport.sol";
 import {DemoAsset} from "../contracts/Demo.sol";
-import {MockVerifier, MockChainInfo} from "./Mocks.sol";
+import {MockVerifier, MockChainInfo, HostileAsset, NonPayable} from "./Mocks.sol";
 
 contract PayGoEscrowTest is Test {
     address constant VERIFIER = 0x0000000000000000000000000000000000000FD2;
@@ -16,6 +16,8 @@ contract PayGoEscrowTest is Test {
     uint64 constant GRACE = 2000;
     uint64 constant CURE = 240;
     address constant ROUTER = address(0xA11CE);
+    address constant CUSTODY_ROUTER = address(0xC0D1E);
+    uint64 constant CUSTODY_WINDOW = 240;
     address constant USDC = address(0xBEEF);
     address constant PAYEE = address(0xFEE);
     address seller = address(0x5E11E2);
@@ -29,13 +31,16 @@ contract PayGoEscrowTest is Test {
     function setUp() public {
         vm.etch(VERIFIER, address(new MockVerifier()).code);
         vm.etch(CHAIN_INFO, address(new MockChainInfo()).code);
-        esc = new PayGoEscrow(CHAIN_KEY, ROUTER, GRACE, CURE);
         nft = new DemoAsset();
+        address[] memory allowed = new address[](1); allowed[0] = address(nft);
+        address[] memory allowedTokens = new address[](1); allowedTokens[0] = USDC;
+        esc = new PayGoEscrow(CHAIN_KEY, ROUTER, GRACE, CURE, allowed, CUSTODY_ROUTER, CUSTODY_WINDOW, allowedTokens);
         uint256 tokenId = nft.mint(seller);
         amounts.push(40e6); amounts.push(20e6); amounts.push(20e6); amounts.push(20e6);
+        vm.deal(seller, 10 ether);
         vm.startPrank(seller);
         nft.approve(address(esc), tokenId);
-        orderId = esc.createOrder(buyer, nft, tokenId, PAYEE, USDC, 100e6, 4, 10_000, 1000);   // 40 + 3×20
+        orderId = esc.createOrder{value: 1 ether}(buyer, nft, tokenId, PAYEE, USDC, 100e6, 4, 10_000, 1000);   // 40 + 3×20
         vm.stopPrank();
         MockChainInfo(CHAIN_INFO).setHeight(9_000);
     }
@@ -75,8 +80,10 @@ contract PayGoEscrowTest is Test {
     function test_fullLifecycle_assetToBuyer() public {
         for (uint8 i; i < 4; i++) settleOne(10_000 + uint64(i) * 1000, goodTx(i), i);
         assertEq(uint8(esc.getOrder(orderId).status), uint8(PayGoEscrow.Status.Completed));
+        assertEq(nft.ownerOf(1), address(esc));          // Completed ≠ transferred: pull, not push
+        esc.claimAsset(orderId);
         assertEq(nft.ownerOf(1), buyer);
-        (uint32 honored,, uint128 volume) = esc.passport().records(buyer);
+        (uint32 honored,, uint256 volume) = esc.passport().records(buyer);
         assertEq(honored, 4);
         assertEq(volume, 100e6);
         assertEq(esc.passport().depositBps(buyer), 1500);
@@ -93,6 +100,7 @@ contract PayGoEscrowTest is Test {
             ps[i] = INativeQueryVerifier.MerkleProof(bytes32(uint256(i)), new INativeQueryVerifier.MerkleProofEntry[](0));
         }
         esc.settle(hs, txs, ps, INativeQueryVerifier.ContinuityProof(bytes32(0), new bytes32[](0)));
+        esc.claimAsset(orderId);
         assertEq(nft.ownerOf(1), buyer);
     }
 
@@ -166,6 +174,8 @@ contract PayGoEscrowTest is Test {
         esc.finalizeDefault(orderId);
         vm.roll(block.number + CURE + 1);
         esc.finalizeDefault(orderId);
+        assertEq(nft.ownerOf(1), address(esc));          // Defaulted ≠ transferred: pull, not push
+        esc.withdrawAsset(orderId);
         assertEq(nft.ownerOf(1), seller);
         (, uint32 defaulted,) = esc.passport().records(buyer);
         assertEq(defaulted, 1);
@@ -231,12 +241,199 @@ contract PayGoEscrowTest is Test {
         uint256 t2 = nft.mint(seller);
         vm.startPrank(seller);
         nft.approve(address(esc), t2);
-        uint256 id2 = esc.createOrder(buyer, nft, t2, PAYEE, USDC, 100e6, 4, 20_000, 1000);
+        uint256 id2 = esc.createOrder{value: 1 ether}(buyer, nft, t2, PAYEE, USDC, 100e6, 4, 20_000, 1000);
         vm.stopPrank();
         uint256[] memory a = esc.getOrder(id2).amounts;
         assertEq(a[0], 15e6);                  // 15% instead of 40%
         assertEq(a[1] + a[2] + a[3], 85e6);
         assertEq(esc.getOrder(orderId).amounts[0], 40e6);
+    }
+
+    // ---- WEB-audit-style hardening: whitelist + pull pattern (problem 1: NFT that bricks the release leg)
+
+    function test_createOrder_rejectsUnlistedAsset() public {
+        DemoAsset other = new DemoAsset();          // never passed to the escrow's constructor allowlist
+        uint256 t = other.mint(seller);
+        vm.startPrank(seller);
+        other.approve(address(esc), t);
+        vm.expectRevert("asset not allowlisted");
+        esc.createOrder(buyer, other, t, PAYEE, USDC, 100e6, 4, 30_000, 1000);
+        vm.stopPrank();
+    }
+
+    function test_claimAsset_hostileAssetDoesNotBrickSettleBatch() public {
+        // A second escrow whose allowlist includes a HostileAsset (accepts the deposit leg, then always
+        // reverts) alongside the normal DemoAsset — proves a bad release call cannot brick a shared
+        // settle() batch that also carries a healthy order's proof.
+        HostileAsset bad = new HostileAsset();
+        address[] memory allowed = new address[](2); allowed[0] = address(nft); allowed[1] = address(bad);
+        address[] memory allowedTokens = new address[](1); allowedTokens[0] = USDC;
+        PayGoEscrow esc2 = new PayGoEscrow(CHAIN_KEY, ROUTER, GRACE, CURE, allowed, CUSTODY_ROUTER, CUSTODY_WINDOW, allowedTokens);
+
+        uint256 tBad = bad.mint(seller);
+        uint256 tGood = nft.mint(seller);
+        vm.startPrank(seller);
+        bad.approve(address(esc2), tBad);
+        nft.approve(address(esc2), tGood);
+        uint256 idBad = esc2.createOrder{value: 1 ether}(buyer, bad, tBad, PAYEE, USDC, 10e6, 1, 30_000, 1000);   // 1 installment: pays in full
+        uint256 idGood = esc2.createOrder{value: 1 ether}(buyer, nft, tGood, PAYEE, USDC, 10e6, 1, 30_000, 1000);
+        vm.stopPrank();
+
+        // one settle() batch carries both orders' final (and only) installment
+        uint64[] memory hs = new uint64[](2);
+        bytes[] memory txs = new bytes[](2);
+        INativeQueryVerifier.MerkleProof[] memory ps = new INativeQueryVerifier.MerkleProof[](2);
+        hs[0] = 30_000; hs[1] = 30_000;
+        txs[0] = _installmentTx(address(esc2), idBad, 10e6);
+        txs[1] = _installmentTx(address(esc2), idGood, 10e6);
+        ps[0] = INativeQueryVerifier.MerkleProof(bytes32(uint256(0)), new INativeQueryVerifier.MerkleProofEntry[](0));
+        ps[1] = INativeQueryVerifier.MerkleProof(bytes32(uint256(1)), new INativeQueryVerifier.MerkleProofEntry[](0));
+
+        esc2.settle(hs, txs, ps, INativeQueryVerifier.ContinuityProof(bytes32(0), new bytes32[](0)));   // must NOT revert
+
+        assertEq(uint8(esc2.getOrder(idBad).status), uint8(PayGoEscrow.Status.Completed));
+        assertEq(uint8(esc2.getOrder(idGood).status), uint8(PayGoEscrow.Status.Completed));
+
+        vm.expectRevert("gotcha: release leg reverts");
+        esc2.claimAsset(idBad);                         // the hostile order's own claim fails in isolation…
+
+        esc2.claimAsset(idGood);                        // …but the sibling order's claim is unaffected
+        assertEq(nft.ownerOf(tGood), buyer);
+    }
+
+    function _installmentTx(address escrowAddr, uint256 id, uint256 amount) internal pure returns (bytes memory) {
+        return encodeTx(ROUTER, escrowAddr, id, 0, PAYEE, USDC, amount, 1);
+    }
+
+    // ---- Proof-of-Custody: chip attestation → match returns the bond, mismatch slashes it
+
+    function encodeCustodyTx(address emitter, address escrowAddr, uint256 id, address chip, uint8 role, address submitter)
+        internal pure returns (bytes memory)
+    {
+        bytes32[] memory topics = new bytes32[](3);
+        topics[0] = keccak256("PossessionAttested(address,uint256,address,uint8,address)");
+        topics[1] = bytes32(uint256(uint160(escrowAddr)));
+        topics[2] = bytes32(id);
+        EvmV1Decoder.LogEntryTuple[] memory logs = new EvmV1Decoder.LogEntryTuple[](1);
+        logs[0] = EvmV1Decoder.LogEntryTuple(emitter, topics, abi.encode(chip, role, submitter));
+        bytes[] memory chunks = new bytes[](3);
+        chunks[0] = abi.encode(uint64(0), uint64(0), address(0), false, address(0), uint256(0), bytes(""));
+        chunks[1] = "";
+        chunks[2] = abi.encode(uint8(1), uint64(50_000), logs, bytes(""));
+        return abi.encode(uint8(2), chunks);
+    }
+
+    function settleCustodyOne(uint64 height, bytes memory txb, uint64 txIndex) internal {
+        uint64[] memory hs = new uint64[](1); hs[0] = height;
+        bytes[] memory txs = new bytes[](1); txs[0] = txb;
+        INativeQueryVerifier.MerkleProof[] memory ps = new INativeQueryVerifier.MerkleProof[](1);
+        ps[0] = INativeQueryVerifier.MerkleProof(bytes32(uint256(txIndex)), new INativeQueryVerifier.MerkleProofEntry[](0));
+        esc.settleCustody(hs, txs, ps, INativeQueryVerifier.ContinuityProof(bytes32(0), new bytes32[](0)));
+    }
+
+    address constant CHIP = address(0xC41D);
+
+    function test_custody_matchingChipReturnsBondToSeller() public {
+        settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, seller), 50);   // Origin, submitted by the seller
+        assertEq(esc.getOrder(orderId).chipId, CHIP);
+        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 1, buyer), 51);   // Delivery, same chip, submitted by the buyer
+        assertTrue(esc.getOrder(orderId).custodyVerified);
+        assertEq(esc.bondRecipient(orderId), seller);
+
+        esc.withdrawBond(orderId);                              // resolve — credits the pooled claimable balance
+        assertEq(esc.custodyBond(orderId), 0);
+        assertEq(esc.claimableBond(seller), 1 ether);
+
+        uint256 before = seller.balance;
+        vm.prank(seller);
+        esc.claimBond();                                        // pull — seller receives it
+        assertEq(seller.balance, before + 1 ether);
+
+        (uint32 confirmed, uint32 disputed) = esc.sellerPassport().records(seller);
+        assertEq(confirmed, 1); assertEq(disputed, 0);
+    }
+
+    function test_custody_mismatchedChipSlashesBondToBuyer() public {
+        settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, seller), 50);          // Origin: real chip, real seller
+        address swappedChip = address(0xBAD1D);
+        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, swappedChip, 1, buyer), 51);   // Delivery: different chip, real buyer
+        assertTrue(esc.getOrder(orderId).custodyDisputed);
+        assertEq(esc.bondRecipient(orderId), buyer);
+
+        esc.withdrawBond(orderId);
+        uint256 before = buyer.balance;
+        vm.prank(buyer);
+        esc.claimBond();
+        assertEq(buyer.balance, before + 1 ether);
+
+        (uint32 confirmed, uint32 disputed) = esc.sellerPassport().records(seller);
+        assertEq(confirmed, 0); assertEq(disputed, 1);
+    }
+
+    function test_custody_secondOriginAttestationIgnored() public {
+        settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, seller), 50);
+        address otherChip = address(0xAAAA);
+        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, otherChip, 0, seller), 51);   // a second "origin" attempt
+        assertEq(esc.getOrder(orderId).chipId, CHIP);           // first still wins — can't be rebound
+    }
+
+    // SC-AUDIT-03 regression: a third party (or the buyer) squatting the Origin slot with someone else's
+    // chip must be rejected — only the seller may bind role 0.
+    function test_custody_originSquatByNonSellerRejected() public {
+        settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, address(0xBADBAD), 0, buyer), 50);
+        assertEq(esc.getOrder(orderId).chipId, address(0));      // squat rejected: chip stays unbound
+        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, seller), 51);
+        assertEq(esc.getOrder(orderId).chipId, CHIP);             // the real seller's Origin binds cleanly afterward
+    }
+
+    function test_withdrawBond_timeoutFavorsSellerAbsentDispute() public {
+        for (uint8 i; i < 4; i++) settleOne(10_000 + uint64(i) * 1000, goodTx(i), i);   // order Completed, no custody attestation ever submitted
+        vm.expectRevert("not resolved");
+        esc.withdrawBond(orderId);                              // window hasn't passed yet
+        vm.roll(block.number + CUSTODY_WINDOW + 1);
+        esc.withdrawBond(orderId);                              // silence is not evidence against the seller
+        uint256 before = seller.balance;
+        vm.prank(seller);
+        esc.claimBond();
+        assertEq(seller.balance, before + 1 ether);
+    }
+
+    // SC-AUDIT-02 regression: a recipient that can't accept a bare value transfer must not brick the
+    // per-order resolution — `withdrawBond` always finalizes; only the pull (`claimBond`) can fail, and
+    // only for its own caller.
+    function test_claimBond_nonPayableRecipientDoesNotBrickResolution() public {
+        NonPayable np = new NonPayable();
+        vm.deal(seller, 10 ether);
+        vm.startPrank(seller);
+        uint256 t2 = nft.mint(seller);
+        nft.approve(address(esc), t2);
+        uint256 id2 = esc.createOrder{value: 1 ether}(address(np), nft, t2, PAYEE, USDC, 100e6, 4, 40_000, 1000);
+        vm.stopPrank();
+        settleCustodyOne(40_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), id2, CHIP, 0, seller), 60);
+        settleCustodyOne(40_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), id2, address(0xBAD1D), 1, address(np)), 61);
+        assertEq(esc.bondRecipient(id2), address(np));
+        esc.withdrawBond(id2);                                  // resolution succeeds regardless of np's payability
+        assertEq(esc.claimableBond(address(np)), 1 ether);
+        vm.prank(address(np));
+        vm.expectRevert("transfer failed");
+        esc.claimBond();                                        // only the doomed pull reverts, isolated to np
+    }
+
+    function test_createOrder_requiresBondOrCleanCustodyRecord() public {
+        uint256 t = nft.mint(seller);
+        vm.startPrank(seller);
+        nft.approve(address(esc), t);
+        vm.expectRevert("post a custody bond, or build a clean delivery record");
+        esc.createOrder(buyer, nft, t, PAYEE, USDC, 100e6, 4, 40_000, 1000);   // no value, no track record
+        vm.stopPrank();
+
+        // seed 4 clean chip-matched deliveries directly on the passport (equivalent to 4 real settleCustody flows)
+        vm.startPrank(address(esc));
+        for (uint8 i; i < 4; i++) esc.sellerPassport().record(seller, true);
+        vm.stopPrank();
+
+        vm.prank(seller);
+        esc.createOrder(buyer, nft, t, PAYEE, USDC, 100e6, 4, 40_000, 1000);   // waived: no value sent, no revert
     }
 
     function test_passport_isSoulbound() public {

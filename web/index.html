@@ -81,6 +81,7 @@ th{color:var(--ink-40);font-weight:500;font-size:11px;text-transform:uppercase;l
     <label>Price (tUSDC)</label><input id="s-price" value="100">
     <label>Installments</label><input id="s-n" value="4">
     <label>Interval (Sepolia blocks, multiple of 1000)</label><input id="s-int" value="1000">
+    <label>Custody bond (tCTC — skip only with a clean seller passport)</label><input id="s-bond" value="0.001">
     <button id="s-create">Mint demo asset & create order</button>
     <div id="s-out" class="mono"></div>
   </section>
@@ -110,12 +111,22 @@ th{color:var(--ink-40);font-weight:500;font-size:11px;text-transform:uppercase;l
     <div style="margin-top:16px"><span class="mut" style="font-size:12px">Share this checkout</span><img id="qr" alt="QR"></div>
   </section>
 
+  <section class="card"><h2><span class="n">5</span> Proof-of-Custody</h2>
+    <div class="desc">A chip embedded in the physical asset signs at listing (Origin) and again at handoff (Delivery). Same chip both times → the custody bond returns to the seller. A different chip → cryptographic proof of substitution, the bond is slashed to the buyer. No jury for the common case.</div>
+    <label>Chip private key (demo stand-in for an NFC chip's keypair)</label><input id="c-key" placeholder="0x…"><button id="c-gen" class="sec">Generate a chip</button>
+    <label>Order id</label><input id="c-id" value="1">
+    <button id="c-origin">Attest Origin (seller)</button><button id="c-delivery" class="sec">Attest Delivery (buyer scan)</button>
+    <button id="c-bond" class="sec">Check bond</button><button id="c-withdraw" class="sec">Resolve bond</button><button id="c-claim" class="sec">Claim my bond</button>
+    <div id="c-out" class="mono"></div>
+  </section>
+
   <section class="card wide" id="log"><h2><span class="n">◇</span> Worker</h2><div id="log-body" class="mono"></div></section>
 </main>
 <script>
 const $=s=>document.querySelector(s);const E=ethers;
-const ESCROW_ABI=['function createOrder(address buyer,address asset,uint256 tokenId,address payee,address payToken,uint256 price,uint8 n,uint64 firstDeadline,uint64 interval) returns (uint256)','function nextOrderId() view returns (uint256)','function getOrder(uint256) view returns (tuple(address seller,address buyer,address asset,uint256 tokenId,address payee,address payToken,uint64 firstDeadline,uint64 interval,uint8 n,uint8 paidCount,uint8 disputedNo,uint8 status,uint64 assertedAt,uint256[] amounts))','function paid(uint256,uint8) view returns (bool)','function passport() view returns (address)','function declareDefault(uint256)','function finalizeDefault(uint256)','function GRACE() view returns (uint64)','function CURE_WINDOW() view returns (uint64)'];
-const PASS_ABI=['function records(address) view returns (uint32 honored,uint32 defaulted,uint128 volume)','function depositBps(address) view returns (uint16)','function balanceOf(address) view returns (uint256)'];
+const ESCROW_ABI=['function createOrder(address buyer,address asset,uint256 tokenId,address payee,address payToken,uint256 price,uint8 n,uint64 firstDeadline,uint64 interval) payable returns (uint256)','function nextOrderId() view returns (uint256)','function getOrder(uint256) view returns (tuple(address seller,address buyer,address asset,uint256 tokenId,address payee,address payToken,uint64 firstDeadline,uint64 interval,uint8 n,uint8 paidCount,uint8 disputedNo,uint8 status,uint64 assertedAt,uint64 completedAt,address chipId,bool custodyVerified,bool custodyDisputed,uint256[] amounts))','function paid(uint256,uint8) view returns (bool)','function passport() view returns (address)','function sellerPassport() view returns (address)','function declareDefault(uint256)','function finalizeDefault(uint256)','function GRACE() view returns (uint64)','function CURE_WINDOW() view returns (uint64)','function custodyBond(uint256) view returns (uint256)','function bondRecipient(uint256) view returns (address)','function withdrawBond(uint256)','function claimableBond(address) view returns (uint256)','function claimBond()'];
+const CUSTODY_ROUTER_ABI=['function digest(address escrow,uint256 orderId,uint8 role) view returns (bytes32)','function attestPossession(address escrow,uint256 orderId,uint8 role,address chip,bytes signature)'];
+const PASS_ABI=['function records(address) view returns (uint32 honored,uint32 defaulted,uint256 volume)','function depositBps(address) view returns (uint16)','function balanceOf(address) view returns (uint256)'];
 const ASSET_ABI=['function mint(address) returns (uint256)','function next() view returns (uint256)','function approve(address,uint256)','function ownerOf(uint256) view returns (address)'];
 const ROUTER_ABI=['function payWithPermit(address escrow,uint256 orderId,uint8 installmentNo,address token,address payee,uint256 amount,uint256 deadline,uint8 v,bytes32 r,bytes32 s)'];
 const USDC_ABI=['function mint(address,uint256)','function nonces(address) view returns (uint256)','function name() view returns (string)','function balanceOf(address) view returns (uint256)'];
@@ -135,7 +146,8 @@ $('#connect').onclick=async()=>{if(!window.ethereum)return alert('Install MetaMa
 $('#s-create').onclick=async()=>{try{const s=await net(CC.chainId,CC);const asset=new E.Contract(cfg.asset,ASSET_ABI,s),esc=new E.Contract(cfg.escrow,ESCROW_ABI,s);
  const id=await asset.next();$('#s-out').textContent='minting asset #'+id+'…';await (await asset.mint(me)).wait();await (await asset.approve(cfg.escrow,id)).wait();
  const head=await sepRead.getBlockNumber();const first=(Math.floor(head/1000)+2)*1000;const buyer=$('#s-buyer').value||me;
- const tx=await esc.createOrder(buyer,cfg.asset,id,me,cfg.usdc,BigInt(Math.round(+$('#s-price').value*1e6)),+$('#s-n').value,first,+$('#s-int').value);await tx.wait();
+ const bond=E.parseEther($('#s-bond').value||'0');
+ const tx=await esc.createOrder(buyer,cfg.asset,id,me,cfg.usdc,BigInt(Math.round(+$('#s-price').value*1e6)),+$('#s-n').value,first,+$('#s-int').value,{value:bond});await tx.wait();
  const oid=(await esc.nextOrderId())-1n;$('#s-out').innerHTML=`order <b>${oid}</b> created · asset #${id} escrowed · first deadline Sepolia height ${first}`;$('#b-id').value=$('#t-id').value=oid;log('order '+oid+' created','ok');loadOrder()}catch(e){$('#s-out').textContent=e.shortMessage||e.message}};
 // 2 buyer
 let order;async function loadOrder(){const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const id=+$('#b-id').value;order=await esc.getOrder(id);if(order.n==0){$('#b-sched').textContent='no such order';return}
@@ -172,9 +184,27 @@ $('#t-final').onclick=async()=>{try{const s=await net(CC.chainId,CC);const tx=aw
 // 4 passport
 $('#p-load').onclick=async()=>{const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const p=new E.Contract(await esc.passport(),PASS_ABI,ccRead);const a=$('#p-addr').value||me;if(!a)return;const r=await p.records(a);const bps=await p.depositBps(a);
  $('#p-out').innerHTML=`<table><tr><td>installments honored (each one an Attestcoin proof)</td><td><b>${r.honored}</b></td></tr><tr><td>defaults consumed</td><td><b>${r.defaulted}</b></td></tr><tr><td>volume proven</td><td>${fmt(r.volume)}</td></tr><tr><td>next deposit</td><td><b>${Number(bps)/100} %</b></td></tr><tr><td>passport token</td><td>${(await p.balanceOf(a))>0n?'<span class=ok>minted (soulbound)</span>':'<span class=mut>none yet</span>'}</td></tr></table>`};
+// 5 Proof-of-Custody — the chip is a standalone keypair, never the connected wallet: it signs a raw
+// digest locally (matches CustodyRouter's ECDSA.recover with no message prefix), then anyone submits it.
+$('#c-gen').onclick=()=>{const w=E.Wallet.createRandom();$('#c-key').value=w.privateKey;$('#c-out').innerHTML=`chip address: <b>${w.address}</b> — bind it to the seller's Origin attestation, then reuse the same key to prove Delivery`};
+async function attestCustody(role){try{const pk=$('#c-key').value;if(!pk)return $('#c-out').textContent='paste or generate a chip key first';
+ const chip=new E.Wallet(pk).address;const id=+$('#c-id').value;const s=await net(SEP.chainId,SEP);
+ const cr=new E.Contract(cfg.custodyRouter,CUSTODY_ROUTER_ABI,s);const digest=await cr.digest(cfg.escrow,id,role);
+ const sig=new E.SigningKey(pk).sign(digest).serialized;
+ const tx=await cr.attestPossession(cfg.escrow,id,role,chip,sig);$('#c-out').textContent=(role?'delivery':'origin')+' attestation… '+tx.hash;await tx.wait();
+ $('#c-out').innerHTML=`chip <b>${chip}</b> attested ${role?'Delivery':'Origin'} on Sepolia: <span class=ok>${tx.hash}</span><br>the worker will prove it on Creditcoin in ~10 min`;log((role?'delivery':'origin')+' attested '+tx.hash,'ok')}catch(e){$('#c-out').textContent=e.shortMessage||e.message}}
+$('#c-origin').onclick=()=>attestCustody(0);$('#c-delivery').onclick=()=>attestCustody(1);
+$('#c-bond').onclick=async()=>{const esc=new E.Contract(cfg.escrow,ESCROW_ABI,ccRead);const id=+$('#c-id').value;
+ const bond=await esc.custodyBond(id),to=await esc.bondRecipient(id),o=await esc.getOrder(id);
+ $('#c-out').innerHTML=`bond: <b>${E.formatEther(bond)} tCTC</b> · chip bound: ${o.chipId==='0x0000000000000000000000000000000000000000'?'<span class=mut>none yet</span>':o.chipId}<br>`+
+  (o.custodyVerified?'<span class=ok>authenticity confirmed</span>':o.custodyDisputed?'<span class=bad>mismatch — cryptographic proof of substitution</span>':'<span class=mut>unresolved</span>')+
+  (to!=='0x0000000000000000000000000000000000000000'?` · recipient: ${to}`:'')};
+$('#c-withdraw').onclick=async()=>{try{const s=await net(CC.chainId,CC);const tx=await new E.Contract(cfg.escrow,ESCROW_ABI,s).withdrawBond(+$('#c-id').value);$('#c-out').textContent='resolving… '+tx.hash;await tx.wait();$('#c-out').innerHTML=`bond resolved into the claimable pool: <span class=ok>${tx.hash}</span> — the recipient can now "Claim my bond"`;log('bond resolved '+tx.hash,'ok')}catch(e){$('#c-out').textContent=e.shortMessage||e.message}};
+$('#c-claim').onclick=async()=>{try{const s=await net(CC.chainId,CC);const tx=await new E.Contract(cfg.escrow,ESCROW_ABI,s).claimBond();$('#c-out').textContent='claiming… '+tx.hash;await tx.wait();$('#c-out').innerHTML=`bond claimed: <span class=ok>${tx.hash}</span>`;log('bond claimed '+tx.hash,'ok')}catch(e){$('#c-out').textContent=e.shortMessage||e.message}};
 async function refreshWorker(){try{const s=await (await fetch('/state')).json();const b=$('#log-body');const lines=[];
  for(const a of s.autopay)lines.push(`autopay order ${a.orderId} #${a.installmentNo} ${a.txHash?'paid '+a.txHash:a.error?'failed: '+a.error:'due at '+new Date(a.validAfter*1000).toLocaleTimeString()}`);
  for(const p of s.pending)lines.push(`pending proof for ${p.hash} (Sepolia ${p.height})`);for(const t of s.settles)lines.push(`settled ${t.count} installment(s) in ${t.tx} — ${t.gas} gas (${Math.round(t.gas/t.count)} each)`);
+ for(const p of s.custodyPending||[])lines.push(`pending custody proof for ${p.hash} (Sepolia ${p.height})`);
  b.replaceChildren(...(lines.length?lines.reverse():['idle']).map(l=>{const d=document.createElement('div');d.textContent=l;return d}))}catch{}}
 init();
 </script></body></html>

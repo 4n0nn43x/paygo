@@ -1,9 +1,10 @@
-// PayGo worker — a convenience relayer, nothing more: `settle` is permissionless, anyone (the buyer
-// included) can submit the same proofs by hand. It does three things:
+// PayGo worker — a convenience relayer, nothing more: `settle`/`settleCustody` are permissionless,
+// anyone (the buyer included) can submit the same proofs by hand. It does four things:
 //   1. autopay: submits the EIP-3009 authorizations the buyer pre-signed at checkout, when they become valid
 //   2. settle:  listen InstallmentPaid on Sepolia → wait until attested → one batch proof per ≤10 txs /
 //               ≤1000-block window → PayGoEscrow.settle on Creditcoin
-//   3. serves web/index.html + a tiny JSON API (POST /authorizations, GET /state) for the checkout
+//   3. settleCustody: same shape, for CustodyRouter's PossessionAttested (Proof-of-Custody chip scans)
+//   4. serves web/index.html + a tiny JSON API (POST /authorizations, GET /state) for the checkout
 import 'dotenv/config';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { proofProvider } from '@gluwa/usc-sdk';
@@ -20,22 +21,31 @@ const ROUTER_ABI = [
   'event InstallmentPaid(address indexed escrow,uint256 indexed orderId,uint8 installmentNo,address payer,address payee,address token,uint256 amount)',
   'function payWithAuthorization(address escrow,uint256 orderId,uint8 installmentNo,address token,address payee,uint256 amount,(address from,uint256 validAfter,uint256 validBefore,uint8 v,bytes32 r,bytes32 s) a)',
 ];
-const ESCROW_ABI = ['function settle(uint64[] heights,bytes[] txs,(bytes32 root,(bytes32 hash,bool isLeft)[] siblings)[] proofs,(bytes32 lowerEndpointDigest,bytes32[] roots) continuity)'];
+const CUSTODY_ROUTER_ABI = ['event PossessionAttested(address indexed escrow,uint256 indexed orderId,address chip,uint8 role,address submitter)'];
+const ESCROW_ABI = [
+  'function settle(uint64[] heights,bytes[] txs,(bytes32 root,(bytes32 hash,bool isLeft)[] siblings)[] proofs,(bytes32 lowerEndpointDigest,bytes32[] roots) continuity)',
+  'function settleCustody(uint64[] heights,bytes[] txs,(bytes32 root,(bytes32 hash,bool isLeft)[] siblings)[] proofs,(bytes32 lowerEndpointDigest,bytes32[] roots) continuity)',
+];
 
 const sepolia = new JsonRpcProvider(env('SOURCE_CHAIN_RPC_URL'));
 const cc = new JsonRpcProvider(env('CREDITCOIN_RPC_URL'));
 const ccWallet = new Wallet(env('CREDITCOIN_WALLET_PRIVATE_KEY'), cc);
 const sepWallet = new Wallet(env('CREDITCOIN_WALLET_PRIVATE_KEY'), sepolia);
 const router = new Contract(env('ROUTER_ADDRESS'), ROUTER_ABI, sepWallet);
+const custodyRouter = process.env.CUSTODY_ROUTER_ADDRESS ? new Contract(process.env.CUSTODY_ROUTER_ADDRESS, CUSTODY_ROUTER_ABI, sepWallet) : undefined;
 const escrow = new Contract(env('ESCROW_ADDRESS'), ESCROW_ABI, ccWallet);
 const prover = new proofProvider.service.ProofBuilder(CHAIN_KEY, env('PROOF_BUILDER_URL'));
 
 type Pending = { hash: string; height: number };
 type Auth = { orderId: string; installmentNo: number; token: string; payee: string; amount: string;
   from: string; validAfter: number; validBefore: number; v: number; r: string; s: string; txHash?: string; error?: string };
-const state: { fromBlock: number; pending: Pending[]; done: string[]; autopay: Auth[]; settles: { tx: string; count: number; gas: string }[] } = existsSync(STATE_FILE)
-  ? { autopay: [], settles: [], ...JSON.parse(readFileSync(STATE_FILE, 'utf8')) }
-  : { fromBlock: Number(process.env.START_BLOCK ?? 0), pending: [], done: [], autopay: [], settles: [] };
+const state: {
+  fromBlock: number; pending: Pending[]; done: string[]; autopay: Auth[]; settles: { tx: string; count: number; gas: string }[];
+  custodyFromBlock: number; custodyPending: Pending[]; custodyDone: string[];
+} = existsSync(STATE_FILE)
+  ? { autopay: [], settles: [], custodyFromBlock: 0, custodyPending: [], custodyDone: [], ...JSON.parse(readFileSync(STATE_FILE, 'utf8')) }
+  : { fromBlock: Number(process.env.START_BLOCK ?? 0), pending: [], done: [], autopay: [], settles: [],
+      custodyFromBlock: Number(process.env.START_BLOCK ?? 0), custodyPending: [], custodyDone: [] };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 
 // ---- 1. autopay
@@ -106,13 +116,65 @@ async function settleLoop() {
   }
 }
 
-// ---- 3. checkout UI + API
+// ---- 3. settleCustody (same shape as 2, for CustodyRouter's PossessionAttested)
+async function collectCustody() {
+  if (!custodyRouter) return;
+  const head = await sepolia.getBlockNumber();
+  if (state.custodyFromBlock === 0) state.custodyFromBlock = head;
+  if (head < state.custodyFromBlock) return;
+  const to = Math.min(head, state.custodyFromBlock + 5000);
+  const logs = await custodyRouter.queryFilter('PossessionAttested', state.custodyFromBlock, to);
+  for (const l of logs) {
+    if (!state.custodyDone.includes(l.transactionHash) && !state.custodyPending.some(p => p.hash === l.transactionHash)) {
+      state.custodyPending.push({ hash: l.transactionHash, height: l.blockNumber });
+      console.log(`+ custody attestation ${l.transactionHash} @${l.blockNumber}`);
+    }
+  }
+  state.custodyFromBlock = to + 1;
+  save();
+}
+
+async function settleCustodyBatch(batch: Pending[]) {
+  const top = Math.max(...batch.map(p => p.height));
+  console.log(`waiting attestation of custody height ${top} (${batch.length} tx)…`);
+  await prover.waitUntilHeightAttested(CHAIN_KEY, top, POLL_MS, 30 * 60_000);
+  const res = await prover.getBatchProof(batch.map(p => p.hash));
+  if (!res.success || !res.data) throw new Error(res.error);
+  const heights: number[] = [], txs: string[] = [], proofs: any[] = [];
+  for (const [h, m] of res.data.merkleProofs) for (const [, e] of m) { heights.push(h); txs.push(e.txBytes); proofs.push(e.merkleProof); }
+  const args = [heights, txs, proofs, res.data.continuityProof];
+  await escrow.settleCustody.staticCall(...args);
+  const tx = await escrow.settleCustody(...args, { gasLimit: 2_000_000 });
+  console.log(`settleCustody ${heights.length} tx → ${tx.hash}`);
+  await tx.wait();
+  state.custodyDone.push(...batch.map(p => p.hash));
+  state.custodyPending = state.custodyPending.filter(p => !batch.includes(p));
+  save();
+}
+
+async function custodySettleLoop() {
+  if (!state.custodyPending.length) return;
+  const sorted = [...state.custodyPending].sort((a, b) => a.height - b.height);
+  const lo = sorted[0].height;
+  const batch = sorted.filter(p => p.height - lo < MAX_RANGE).slice(0, MAX_BATCH);
+  const head = await sepolia.getBlockNumber();
+  if (!(batch.length === MAX_BATCH || head - lo >= MAX_RANGE || process.env.SETTLE_NOW)) return;
+  try { await settleCustodyBatch(batch); }
+  catch (e: any) {
+    console.error('custody batch failed:', e.shortMessage ?? e.message);
+    if (batch.length > 1) for (const p of batch) { try { await settleCustodyBatch([p]); } catch (e2: any) { console.error(`  ${p.hash}: ${e2.shortMessage ?? e2.message}`); } }
+  }
+}
+
+// ---- 4. checkout UI + API
 createServer((req, res) => {
   const json = (code: number, body: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   if (req.method === 'GET' && req.url === '/state') return json(200, {
-    router: env('ROUTER_ADDRESS'), escrow: env('ESCROW_ADDRESS'), usdc: process.env.USDC_ADDRESS, asset: process.env.ASSET_ADDRESS,
+    router: env('ROUTER_ADDRESS'), custodyRouter: process.env.CUSTODY_ROUTER_ADDRESS, escrow: env('ESCROW_ADDRESS'),
+    usdc: process.env.USDC_ADDRESS, asset: process.env.ASSET_ADDRESS,
     chainKey: CHAIN_KEY, sepoliaRpc: env('SOURCE_CHAIN_RPC_URL'), ccRpc: env('CREDITCOIN_RPC_URL'),
     pending: state.pending, autopay: state.autopay, settles: state.settles, done: state.done.length,
+    custodyPending: state.custodyPending, custodyDone: state.custodyDone.length,
   });
   if (req.method === 'POST' && req.url === '/authorizations') {
     let body = ''; let tooBig = false;
@@ -151,7 +213,7 @@ createServer((req, res) => {
 
 (async function loop() {
   for (;;) {
-    try { await autopay(); await collect(); await settleLoop(); }
+    try { await autopay(); await collect(); await settleLoop(); await collectCustody(); await custodySettleLoop(); }
     catch (e: any) { console.error(e.shortMessage ?? e.message); }
     await new Promise(r => setTimeout(r, POLL_MS));
   }

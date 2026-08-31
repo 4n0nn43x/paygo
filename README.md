@@ -11,15 +11,17 @@
 | Path | Chain | What |
 |---|---|---|
 | `contracts/PayGoRouter.sol` | Sepolia | stateless, 3 ways in — `payInstallment`, `payWithPermit` (EIP-2612), `payWithAuthorization` (EIP-3009 autopay) — one `InstallmentPaid` event out |
-| `contracts/PayGoEscrow.sol` | Creditcoin | orders, `settle` (1..10 proofs, one continuity proof), `declareDefault` / `finalizeDefault`; deposit sized by the buyer's passport (40 % → 15 %) |
+| `contracts/CustodyRouter.sol` | Sepolia | stateless, Proof-of-Custody: a chip (EIP-5791) signs at listing (Origin) and delivery — `attestPossession` verifies and emits `PossessionAttested` |
+| `contracts/PayGoEscrow.sol` | Creditcoin | orders (asset contract must be allowlisted at deploy time), `settle` (1..10 proofs, one continuity proof), `settleCustody` (same 5 checks, for chip attestations), `declareDefault` / `finalizeDefault`, `claimAsset` / `withdrawAsset` / `withdrawBond` (pull, not pushed — isolates a hostile asset's `transferFrom` or a reverting bond payout from the settle batch); deposit sized by the buyer's passport (40 % → 15 %) |
 | `contracts/CreditPassport.sol` | Creditcoin | ERC-5192 soulbound record of payment facts, written and read back by the escrow |
+| `contracts/SellerPassport.sol` | Creditcoin | ERC-5192 soulbound record of custody facts (Proof-of-Custody's mirror of CreditPassport) — `waivesBond` gates whether a seller must post a custody stake |
 | `contracts/Attestcoin.sol` | — | precompile interfaces 0x…0FD2 (BlockProver) / 0x…0fD3 (ChainInfo) |
 | `contracts/Demo.sol` | — | `TestUSDC` (permit + EIP-3009), `DemoAsset` |
-| `test/` | — | 22 tests: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture |
-| `worker/settle.ts` | — | convenience relayer: autopay pre-signed authorizations + listen → wait attested → batch proof → `settle`; serves the checkout UI |
-| `web/index.html` | — | single-page checkout: seller listing, 1-click deposit, sign-once autopay, live tracker, passport |
+| `test/` | — | 36 tests: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture, asset allowlist + pull-pattern, Proof-of-Custody (match/mismatch/timeout) |
+| `worker/settle.ts` | — | convenience relayer: autopay pre-signed authorizations + listen → wait attested → batch proof → `settle` / `settleCustody`; serves the checkout UI |
+| `web/index.html` | — | single-page checkout: seller listing (+ custody bond), 1-click deposit, sign-once autopay, live tracker, passport, Proof-of-Custody chip attestation |
 | `web/landing.html` | — | marketing landing — self-contained (open directly): hero with a schedule that lights up as each payment is proven, mechanism, measured proof, the 3 acts |
-| `docs/` | — | `DEMO.md` (3-act stage script), `SUBMISSION.md` (technical submission), `AUDIT.md` |
+| `docs/` | — | `DEMO.md` (stage script), `SUBMISSION.md` (technical submission), `AUDIT.md`; see also [`../docs/08-proof-of-custody.md`](../docs/08-proof-of-custody.md) for the full Proof-of-Custody spec |
 
 ## Run
 
@@ -28,17 +30,26 @@ npm i
 forge test
 ```
 
-## Deployed (CC3 testnet / Sepolia, 2026-08-19)
+## Deployed (CC3 testnet / Sepolia, 2026-08-31)
 
 | Contract | Chain | Address |
 |---|---|---|
-| PayGoRouter | Sepolia | `0x42D5880d5Aa7490D90eF6842478D9d8Aa6D71474` |
-| TestUSDC (permit + EIP-3009) | Sepolia | `0x278138aDe5bE8628fd81a5268Ff2C891FDbBE9F3` |
-| PayGoEscrow (chainKey 1, grace 2000, cure 240) | Creditcoin CC3 | `0x76148A747fCdD26819e0329a9633E24cBE2a53b4` |
-| DemoAsset | Creditcoin CC3 | `0xbEcf8967f7fCe9c4dB9CE47E4c97479A21033D75` |
-| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0xBB52fDa813AC1041a0c05d6049Da41d9797Ea767` |
+| PayGoRouter | Sepolia | `0x413619C8ed9806619622BcDDf272505e29D563b1` |
+| CustodyRouter | Sepolia | `0xeAaD89dE2E8417810BbcCb532d8aed39969CdAfc` |
+| TestUSDC (permit + EIP-3009) | Sepolia | `0xE049C2213107C95BaF0517B6bbb805464371006B` |
+| PayGoEscrow (chainKey 1, grace 2000, cure 240, custody window 240) | Creditcoin CC3 | `0x799b0510Df104159eeEbd280DA0EAD45DE9E08CB` |
+| DemoAsset | Creditcoin CC3 | `0x3473bD97b976B4e5F76f25328881D08e257A6e57` |
+| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x795e97D5B839060a8A5514662F23A9B39C567981` |
+| SellerPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x5a46703cF8053d8854F45314dbf7366393847F1A` |
 
-v2 (post-audit) addresses. Same deployer nonce on both chains kept Router/Escrow aligned across the earlier deploy; the escrow check `topics[1] == address(this)` still namespaces orders per deployment.
+**v3** — post-security-pass redeploy. Includes the asset/payToken allowlists, the pull-pattern
+`claimAsset`/`withdrawAsset`/`withdrawBond`+`claimBond` split, Proof-of-Custody
+(`CustodyRouter`/`SellerPassport`), and the three `audit/findings/` fixes (see `docs/AUDIT.md`).
+Verified on-chain post-deploy: constructor immutables, both new allowlists (`DemoAsset`/`TestUSDC`
+present), and the two child passport contracts all read back correctly. Same deployer nonce ordering
+(Router/CustodyRouter/TestUSDC on Sepolia, then DemoAsset/Escrow on Creditcoin) as prior deploys; the
+escrow check `topics[1] == address(this)` still namespaces orders per deployment — v1/v2 orders (if any
+were left mid-lifecycle) do not carry over to v3's contract state.
 
 ## Demo (CLI)
 
@@ -49,7 +60,16 @@ sh script/demo.sh order         # act 1: seller escrows asset, 4 installments
 sh script/demo.sh pay 1 0       # act 2: buyer pays on Sepolia…
 npm run worker                  #        …worker proves it ~10 min later, escrow settles
 sh script/demo.sh default 1     # act 3: silence after grace → anyone asserts default
-sh script/demo.sh finalize 1    #        cure window passes → asset back to seller
+sh script/demo.sh finalize 1    #        cure window passes → order Defaulted
+sh script/demo.sh withdraw 1    #        seller pulls the asset back (claimAsset for the buyer on completion)
+
+# act 4 (Proof-of-Custody, order 2 e.g.): a chip signs at listing, then again at delivery
+# (each attestation's submitter must be the order's seller/buyer respectively — pass their key as
+# the optional 3rd arg, or run as $PK if you created the order as yourself)
+sh script/demo.sh attest-origin   2 0xCHIP_PRIVATE_KEY 0xSELLER_KEY   # seller's chip, at listing
+sh script/demo.sh attest-delivery 2 0xCHIP_PRIVATE_KEY 0xBUYER_KEY    # same chip at handoff → bond resolves to seller
+sh script/demo.sh withdraw-bond 2                                     # resolve into the claimable pool (or a DIFFERENT chip key → resolves to buyer)
+sh script/demo.sh claim-bond 0xSELLER_KEY                             # (or 0xBUYER_KEY, whoever it resolved to) pull the payout
 ```
 
 ## Measured on CC3 testnet (real proofs, not estimates)

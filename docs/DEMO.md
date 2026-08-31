@@ -34,6 +34,14 @@ Say: *if the buyer had paid on time and the proof is late, that proof cures it �
 optimistic assertion, the proof is its fraud proof.* Then **Finalize default** (pre-aged order so the
 window has elapsed): asset back to seller, passport `defaulted = 1`.
 
+## Act 4 (optional, +1.5 min if the slot allows) — "the object can't be swapped either"
+Order C, chip-backed asset. Show the seller's chip signing at listing (`attest-origin`), the same chip
+signing again at a simulated handoff (`attest-delivery`) → bond returns to the seller, cryptographic
+proof of no substitution. Then repeat with a *different* chip key on a second demo order → bond
+slashed to the buyer instantly, no jury. Say: *the same trick that makes default optimistic — prove a
+positive, never a negative — closes the one hole a payment proof can't: is this even the same object.*
+Cut this act first if time runs short; acts 1-3 carry the pitch on their own.
+
 ## Numbers to say out loud (measured, README)
 - 1 proof: 357 k gas. 3 proofs, 1 continuity proof: 176 k each (−51 %).
 - Fresh proof 43.7 k at the precompile, aged ~85 k: ×2, flat after — freshness matters, batching matters more.
