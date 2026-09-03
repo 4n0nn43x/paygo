@@ -11,7 +11,15 @@ import {MockVerifier, MockChainInfo} from "./Mocks.sol";
 /// @dev Simulates a real-world smart-contract wallet with no payable receive/fallback
 ///      (a plain multisig, a misconfigured account contract, etc). It is a normal, honest
 ///      buyer wallet — not attacker-controlled code, not a hostile asset.
-contract NonPayableBuyer { }
+contract NonPayableBuyer {
+    /// @dev Lets the wallet act as a seller (approve + createOrder) while still being unable to ACCEPT a
+    ///      bare value transfer — `receive`/`fallback` are what a payout needs, not what a call needs.
+    function exec(address target, uint256 value, bytes calldata data) external returns (bytes memory) {
+        (bool ok, bytes memory ret) = target.call{value: value}(data);
+        require(ok, "exec failed");
+        return ret;
+    }
+}
 
 /// @notice SC-AUDIT-02 regression. Was Medium: `withdrawBond`'s raw `.call` had no recovery path — if
 ///         the resolved recipient couldn't accept native value, the bond was permanently stuck, with
@@ -37,7 +45,8 @@ contract ZZBondLockPoCTest is Test {
     PayGoEscrow esc;
     DemoAsset nft;
     uint256 orderId;
-    NonPayableBuyer buyer;
+    NonPayableBuyer sellerWallet;
+    address buyer = address(0xB0B);
 
     function encodeCustodyTx(address emitter, address escrowAddr, uint256 id, address chip, uint8 role, address submitter)
         internal pure returns (bytes memory)
@@ -67,42 +76,43 @@ contract ZZBondLockPoCTest is Test {
         vm.etch(VERIFIER, address(new MockVerifier()).code);
         vm.etch(CHAIN_INFO, address(new MockChainInfo()).code);
         nft = new DemoAsset();
-        buyer = new NonPayableBuyer();
+        // The non-payable wallet is now the SELLER: after SC-AUDIT-04 a mismatch pays nobody, so the seller
+        // (via a chip match, or via the silence timeout) is the only leg that still pays a real party — and
+        // therefore the only leg where a recipient that cannot accept native value still matters.
+        sellerWallet = new NonPayableBuyer();
         address[] memory allowed = new address[](1); allowed[0] = address(nft);
         address[] memory allowedTokens = new address[](1); allowedTokens[0] = USDC;
         esc = new PayGoEscrow(CHAIN_KEY, ROUTER, GRACE, CURE, allowed, CUSTODY_ROUTER, CUSTODY_WINDOW, allowedTokens);
-        uint256 tokenId = nft.mint(seller);
-        vm.deal(seller, 10 ether);
-        vm.startPrank(seller);
-        nft.approve(address(esc), tokenId);
-        // seller posts a 1 ether custody bond, names `buyer` (an honest, ordinary smart-contract
-        // wallet the seller does not control) as the counterparty
-        orderId = esc.createOrder{value: 1 ether}(address(buyer), nft, tokenId, PAYEE, USDC, 100e6, 1, 10_000, 1000);
-        vm.stopPrank();
+        uint256 tokenId = nft.mint(address(sellerWallet));
+        vm.deal(address(sellerWallet), 10 ether);
+        sellerWallet.exec(address(nft), 0, abi.encodeWithSignature("approve(address,uint256)", address(esc), tokenId));
+        bytes memory ret = sellerWallet.exec(address(esc), 1 ether, abi.encodeWithSignature(
+            "createOrder(address,address,uint256,address,address,uint256,uint8,uint64,uint64)",
+            buyer, address(nft), tokenId, PAYEE, USDC, uint256(100e6), uint8(1), uint64(10_000), uint64(1000)));
+        orderId = abi.decode(ret, (uint256));
         MockChainInfo(CHAIN_INFO).setHeight(9_000);
     }
 
     function test_withdrawBond_resolvesCleanly_onlyThePullToNonPayableFails() public {
-        // Real-world custody fraud: the delivery chip does not match the origin chip.
-        // settleCustody correctly slashes the bond to the buyer.
-        settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, seller), 50);
-        address swappedChip = address(0xBAD1D);
-        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, swappedChip, 1, address(buyer)), 51);
-        assertTrue(esc.getOrder(orderId).custodyDisputed);
-        assertEq(esc.bondRecipient(orderId), address(buyer));
+        // Honest delivery: the same chip signs at Origin and at Delivery, so the bond returns to the seller —
+        // whose wallet happens to be unable to accept a bare value transfer.
+        settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, address(sellerWallet)), 50);
+        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 1, buyer), 51);
+        assertTrue(esc.getOrder(orderId).custodyVerified);
+        assertEq(esc.bondRecipient(orderId), address(sellerWallet));
         assertEq(esc.custodyBond(orderId), 1 ether);
 
         // Resolution now succeeds unconditionally — no external call, can't fail on a bad recipient.
         esc.withdrawBond(orderId);
         assertEq(esc.custodyBond(orderId), 0, "per-order bookkeeping finalized, not wedged");
-        assertEq(esc.claimableBond(address(buyer)), 1 ether, "credited to the pooled claimable balance");
+        assertEq(esc.claimableBond(address(sellerWallet)), 1 ether, "credited to the pooled claimable balance");
 
         // Only the final pull fails, and only for the non-payable recipient itself — isolated, retryable
         // by anyone in principle, and it doesn't leave any OTHER order's state stuck.
         vm.expectRevert("transfer failed");
-        vm.prank(address(buyer));
+        vm.prank(address(sellerWallet));
         esc.claimBond();
-        assertEq(esc.claimableBond(address(buyer)), 1 ether, "claim credit untouched, can be pulled once buyer is payable");
+        assertEq(esc.claimableBond(address(sellerWallet)), 1 ether, "claim credit untouched, pullable once payable");
         assertEq(address(esc).balance, 1 ether, "still correctly held by the escrow, not lost");
     }
 }

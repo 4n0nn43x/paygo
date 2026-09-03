@@ -67,14 +67,18 @@ the physical asset (EIP-5791 "Physical Backed Token" pattern — a self-generate
 signs a challenge at listing (`role=Origin`) and again at handoff (`role=Delivery`), both proven
 cross-chain through the identical `settle`-style pipeline (nullifier, `verifyAndEmit`, receiptStatus,
 emitter filter, fields) via a new `CustodyRouter.sol` on Sepolia and `PayGoEscrow.settleCustody`. Same
-chip both times = cryptographic proof of no substitution, bond returns to the seller; different chip =
-cryptographic proof of substitution, the seller's bond is slashed to the buyer automatically. The bond
+chip both times = cryptographic proof of no substitution, and the bond returns to the seller. A mismatch is
+deliberately **not** its mirror image: a chip is a keypair, so anyone can produce a signature that fails to
+match, and paying the buyer for one would be a bounty on lying. A mismatch pays nobody — the bond is burned,
+so a seller who really swapped the item still loses it while a buyer gains nothing by claiming a swap. Only
+positive facts are ever proven, on this side as on the payment side (`AUDIT.md` SC-AUDIT-04). The bond
 is a flat, seller-chosen CTC stake — deliberately **not** a percentage of `price`, since that would
 need a CTC/payToken price oracle and reintroduce exactly the oracle dependency PayGo avoids elsewhere.
 A `SellerPassport` (ERC-5192, mirrors `CreditPassport`) waives the bond after 4 chip-matched deliveries
 with zero proven mismatches. Full spec: `../docs/08-proof-of-custody.md`. Implemented and tested
-(`test/CustodyRouter.t.sol`, `test_custody_*` in `test/PayGoEscrow.t.sol`), independently reviewed
-(`AUDIT.md`: three findings, all fixed with regression tests) and deployed on testnet (addresses in the README).
+(`test/CustodyRouter.t.sol`, `test_custody_*` in `test/PayGoEscrow.t.sol`), independently reviewed twice
+(`AUDIT.md`: two multi-agent passes, every surviving finding fixed with a regression test) and deployed on
+testnet (addresses in the README).
 
 ## Setup
 ```sh

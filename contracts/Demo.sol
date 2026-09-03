@@ -12,12 +12,26 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 contract TestUSDC is ERC20Permit {
     bytes32 public constant RECEIVE_WITH_AUTHORIZATION_TYPEHASH =
         keccak256("ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)");
+    bytes32 public constant CANCEL_AUTHORIZATION_TYPEHASH =
+        keccak256("CancelAuthorization(address authorizer,bytes32 nonce)");
     mapping(address => mapping(bytes32 => bool)) public authorizationState;
     event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce);
+    event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce);
 
     constructor() ERC20("Test USDC", "tUSDC") ERC20Permit("Test USDC") {}
     function decimals() public pure override returns (uint8) { return 6; }
     function mint(address to, uint256 amount) external { _mint(to, amount); }
+
+    /// @notice EIP-3009 revocation, as real USDC v2 exposes it. Without this a pre-signed installment
+    ///         outlives the order it was signed for: after a default the seller could still submit the
+    ///         remaining authorizations and collect installments on a closed order (SC-AUDIT-09).
+    function cancelAuthorization(address authorizer, bytes32 nonce, uint8 v, bytes32 r, bytes32 s) external {
+        require(!authorizationState[authorizer][nonce], "authorization used or canceled");
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(CANCEL_AUTHORIZATION_TYPEHASH, authorizer, nonce)));
+        require(ECDSA.recover(digest, v, r, s) == authorizer, "invalid signature");
+        authorizationState[authorizer][nonce] = true;
+        emit AuthorizationCanceled(authorizer, nonce);
+    }
 
     function receiveWithAuthorization(
         address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce,

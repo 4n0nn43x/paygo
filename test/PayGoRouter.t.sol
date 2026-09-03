@@ -80,6 +80,30 @@ contract PayGoRouterTest is Test {
         assertEq(usdc.balanceOf(attacker), 0);
     }
 
+    // SC-AUDIT-09: a pre-signed installment outlives the order it was signed for — after a default the
+    // seller could still submit the remaining authorizations. EIP-3009 revocation (which real USDC has) is
+    // the buyer's only remedy, so the demo token must expose it too.
+    function test_cancelAuthorization_revokesAPresignedInstallment() public {
+        PayGoRouter.Authorization memory a = _auth(0, block.timestamp + 1 hours, 20e6, escrow, 1, 1, payee);
+        bytes32 nonce = router.authNonce(escrow, 1, 1, payee);
+
+        bytes32 digest = _hash(keccak256(abi.encode(usdc.CANCEL_AUTHORIZATION_TYPEHASH(), buyer, nonce)));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(buyerPk, digest);
+        usdc.cancelAuthorization(buyer, nonce, v, r, s);
+
+        vm.expectRevert("authorization used");
+        router.payWithAuthorization(escrow, 1, 1, address(usdc), payee, 20e6, a);
+        assertEq(usdc.balanceOf(payee), 0, "the revoked installment can never be pulled");
+    }
+
+    function test_cancelAuthorization_onlyTheSignerCanRevoke() public {
+        bytes32 nonce = router.authNonce(escrow, 1, 1, payee);
+        bytes32 digest = _hash(keccak256(abi.encode(usdc.CANCEL_AUTHORIZATION_TYPEHASH(), buyer, nonce)));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, digest);
+        vm.expectRevert("invalid signature");
+        usdc.cancelAuthorization(buyer, nonce, v, r, s);
+    }
+
     function test_authorization_boundToRouter() public {
         bytes32 nonce = router.authNonce(escrow, 1, 1, payee);
         bytes32 digest = _hash(keccak256(abi.encode(usdc.RECEIVE_WITH_AUTHORIZATION_TYPEHASH(),

@@ -121,3 +121,29 @@ exactly what `docs/AUDIT.md` already flags as owed). Four hunter slices, run in 
 2. `PayGoEscrow.sol` + `CustodyRouter.sol` Proof-of-Custody surface (new, unaudited)
 3. `PayGoEscrow.sol` pull-pattern release (`claimAsset`/`withdrawAsset`/`withdrawBond`) + bond accounting
 4. `CreditPassport.sol` / `SellerPassport.sol` fact-ledger + `createOrder`'s deposit/bond sizing math
+
+---
+
+# Recon delta — v5 source (2026-09-03), pre-redeploy audit pass
+
+HEAD `2f8d1c1`. Deployed testnet contracts are still v4; this pass audits the source that will become v5.
+
+## What changed since the 2026-08-31 pass
+
+| File | Lines | Change |
+|---|---|---|
+| `contracts/PayGoEscrow.sol` | 391 | `Order.completedAt` → `closedAt`, also stamped by `finalizeDefault`; `withdrawBond` timeout accepts `Completed \|\| Defaulted`; `settle`/`settleCustody` share `_verifyBatch(…, salt)` (salt `""` / `"custody"`) |
+| `contracts/Soulbound.sol` | 38 | **new** abstract base: ERC-721 read surface + ERC-5192 lock, `_has()` abstract, `_mintOnFirstFact()` |
+| `contracts/CreditPassport.sol` | 45 | extends `Soulbound`; `Strings.toString` |
+| `contracts/SellerPassport.sol` | 42 | extends `Soulbound`; `Strings.toString` |
+| `contracts/Demo.sol` | 84 | `Strings.toString` |
+| `worker/settle.ts` | 214 | settle-on-attestation default (`BATCH_WAIT=1` batches); one lane set for payments + custody |
+
+## Invariants added / sharpened
+12. `closedAt` is written only by the two terminal transitions (Completed in `_applyLog`, Defaulted in `finalizeDefault`); `withdrawBond`'s timeout branch never fires while `closedAt == 0`.
+13. Nullifier preimages are byte-identical to v4: `encodePacked(CHAIN_KEY, height, txIndex)` and the same + `"custody"`.
+14. Soulbound mint events fire exactly once per address, before the first fact is written; `ownerOf` reverts `"no passport"` until then.
+15. A Defaulted order's unresolved bond returns to the seller after `CUSTODY_WINDOW` — never to the buyer absent a proven mismatch.
+
+## Static analysis
+See `scripts/static.sh` output in this pass (Slither + Aderyn), summarised in the findings below where relevant.

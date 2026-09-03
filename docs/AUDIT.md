@@ -120,6 +120,110 @@ the seller's custody bond with no exit path at all.
 timeout branch accepts `Completed || Defaulted` — silence still favors the seller, same polarity as before.
 Regression: `test_withdrawBond_timeoutAfterDefaultFavorsSeller`. Needs a redeploy (README).
 
+## Second independent multi-agent audit pass (2026-09-03, pre-v5-deploy)
+
+Four hunters (escrow lifecycle/bond, proof pipeline/nullifier, source-chain + relayer, actor axis) run in
+parallel on the post-refactor source, then three refuters on different lenses. Slither + Aderyn + `forge
+coverage` first (no protocol-level finding of their own: the reentrancy hits are calls into this contract's
+own immutable children or the read-only precompile, and the `.call` in `claimBond` is the pull pattern).
+Six findings survived refutation; two more were refuted at the claimed severity and are recorded as such.
+
+## SC-AUDIT-05 — Asset release replays once the token is re-escrowed — **Critical — FIXED**
+`claimAsset`/`withdrawAsset` checked only the order's terminal status, and a terminal status is absorbing.
+After order 1 released a token, the same `(asset, tokenId)` re-escrowed in a later order could be pulled
+straight back out by replaying order 1's release: the escrow is the owner again, so the ERC-721 transfer is
+authorized. The new order's buyer paid in full and their `claimAsset` reverted for ever. Repossess-then-relist
+is the core hire-purchase flow, not an edge case, and the call is unauthenticated.
+**Fix**: a `released[id]` flag, set before the transfer on both legs.
+Regression: `test_withdrawAsset_cannotBeReplayedAfterTheAssetIsRelisted`,
+`test_claimAsset_cannotBeReplayedAfterTheAssetIsRelisted`.
+
+## SC-AUDIT-06 — Unbounded schedule turns a filter into a panic — **High — FIXED**
+`createOrder` bounded `firstDeadline`/`interval` only by epoch alignment, and `deadline()` is checked `uint64`
+arithmetic *reached from inside `_applyLog`'s filter chain*. A seller could create a throwaway order whose
+`deadline(id, 1)` overflows; the resulting log panics instead of being skipped, so any transaction carrying it
+reverts for ever — re-opening exactly the poison-log DoS MEDIUM-1 was fixed to close, this time unfixably per
+transaction (the nullifier is per source tx). Co-locating a victim's publicly submittable EIP-3009 autopay in
+that same Sepolia transaction makes the victim's payment unsettleable and drives a wrongful default. The same
+overflow also panics `declareDefault`, leaving the order with no exit.
+**Fix**: `createOrder` requires `firstDeadline + n*interval + GRACE <= type(uint64).max`.
+Regression: `test_createOrder_rejectsScheduleOverflowingUint64`.
+
+## SC-AUDIT-07 — `declareDefault` on an order that does not exist yet — **High — FIXED**
+An unwritten order reads `status == Active` (enum zero) with `deadline() == 0`, so any id above `nextOrderId`
+could be driven to `DefaultAsserted` and then `Defaulted` — and `createOrder` never resets the lifecycle
+fields, so the order was *born closed*. A third party could poison a run of future ids for gas and make every
+order the protocol then creates stillborn; there is no admin and no reset. `_applyCustodyLog` already had the
+missing existence check one function away.
+**Fix**: `require(o.seller != address(0), "unknown order")` in `declareDefault`.
+Regression: `test_declareDefault_rejectsUnknownOrder`.
+
+## SC-AUDIT-04 — A chip mismatch was a bounty on lying — **High — FIXED (design change)**
+`_applyCustodyLog` paid the custody bond to the buyer on a mismatch, on the stated ground that a mismatch is
+"a cryptographic proof of substitution". It is not. A chip is a secp256k1 keypair and `attestPossession`
+only checks that the signature recovers to the address presented as the chip, so a buyer who received the
+genuine item can generate a key, attest Delivery with it, take the whole bond and brand the seller `disputed`
+for ever — for one Sepolia transaction. Finding 03's own fix reasoning ("the submitter must be `o.seller` /
+`o.buyer`") assumed the buyer is honest on role 1; that assumption is the bug. It also contradicted the
+protocol's own axiom, stated in `CustodyRouter.sol`: only positive facts are ever proven.
+**Fix**: only a MATCH is a positive proof and still releases the bond to the seller. A mismatch now resolves
+to a burn address, so nobody is paid: the seller who really swapped the item still loses the bond, and the
+buyer gains nothing by lying.
+**Residual (assumed)**: a buyer can still destroy the bond and record a dispute against the seller for the
+price of one transaction. That is griefing without profit, against a counterparty the seller chose — the same
+class as MEDIUM-2, and not closable without out-of-band chip provisioning.
+Regression: `test_custody_mismatchedChipBurnsBondAndPaysNobody`.
+
+## SC-AUDIT-08 — Passport `volume` could be pinned at max — **Low — FIXED**
+`record`'s `r.volume += amount` is checked arithmetic on unbounded attacker input. SC-AUDIT-01 widened the
+type to `uint256` on the reasoning that a narrower one was the problem; `uint256` is also fixed width. The
+real mitigation was `allowedPayTokens`, which carries an unstated precondition: every allowlisted token must
+have a bounded supply. The token this repo deploys, `TestUSDC`, has a permissionless unbounded `mint`, so on
+the testnet configuration a victim's volume could be pinned at max, panicking every later settle naming them.
+Impact on a real-USDC deployment is nil; on the shipped demo configuration it is a wrongful-default vector.
+**Fix**: the accumulator saturates instead of reverting. `volume` is informational and never gates
+`depositBps`, so saturation loses nothing that matters.
+Regression: `test_passport_volumeSaturatesInsteadOfBrickingTheBuyer`.
+
+## SC-AUDIT-09 — Pre-signed installments outlive the order — **Medium — FIXED (mitigated)**
+An EIP-3009 authorization commits to escrow, order, installment and payee, but not to the order still being
+open. After a default and repossession the seller could still submit the remaining authorizations and collect
+installments on a closed order — the escrow filters the logs, but the Ethereum-side transfer already happened.
+The same holds for an installment the buyer already paid by hand. `TestUSDC` had no `cancelAuthorization`,
+so the buyer had no remedy at all, and the claim that swapping in real USDC is "zero code change" was false
+for the revocation half of EIP-3009.
+**Fix**, two layers: `TestUSDC.cancelAuthorization` (the standard EIP-3009 function real USDC exposes), and
+the relayer refuses to submit an authorization whose order is closed or whose installment already settled.
+**Residual**: a malicious seller can still submit directly; revocation is the buyer's actual remedy, and it is
+a race the buyer wins only by acting before `validAfter`.
+Regression: `test_cancelAuthorization_revokesAPresignedInstallment`,
+`test_cancelAuthorization_onlyTheSignerCanRevoke`.
+
+## SC-AUDIT-10 — Unauthenticated autopay queue — **Medium-High — FIXED**
+`POST /authorizations` validated field shapes but never verified the signature, and a duplicate
+`(orderId, installmentNo, from)` was silently skipped. Anyone, from any origin, could take a buyer's queue
+slot with a garbage entry; the buyer's real authorization was then dropped, the UI still said "close your
+laptop", autopay never fired, and a late payment never cures. Sixteen requests also filled the 1000-entry cap
+for everyone, permanently, since nothing was ever evicted. The dedup that made poisoning stick was introduced
+by WEB-2's own fix.
+**Fix**: the worker recovers the EIP-712 signature against the token's own ERC-5267 domain and rejects
+anything that does not recover to `from`; a fresh valid signature replaces an unsent entry; dead entries
+(errored, sent, expired) are pruned; a per-signer cap bounds one spammer; `GET /state` no longer publishes
+`v`/`r`/`s`; and the checkout no longer claims autopay is armed when the relayer accepted nothing.
+
+## Refuted at the claimed severity
+- **Receipt-bloat DoS** — an attacker co-locating a victim's payment in a Sepolia transaction padded with
+  junk logs raises the Creditcoin settle cost superlinearly. Measured against CC3's real 75M block gas limit,
+  the threshold is ~3200 junk logs, not the ~1000 originally claimed, and the vector is strictly dominated by
+  SC-AUDIT-06 (same primitive, no padding needed). Recorded as Low. The worker's fixed 2M gas limit, a real
+  latent liveness bug, is fixed alongside: it now estimates and adds a margin.
+- **Passport poisoning** — anyone can create an order naming any address as buyer, with a past deadline, and
+  drive it to `Defaulted`, writing a permanent `defaulted` fact against an address that never consented. The
+  mechanism is confirmed, but the impact is the 40 % deposit tier that every newcomer already has, and
+  MEDIUM-2 already states the passport is a convenience discount and never a security boundary. Recorded as
+  Low and accepted; note that `docs/02-mecanisme.md` promises a `Created ──deposit──> Active` transition the
+  code has never had, which is a documentation defect corrected in that file.
+
 ## Checked and OK (from the review)
 Nullifier scope (fixed-size `keccak(chainKey‖height‖txIndex)`, no cross-order replay); the 5 checks
 present and tested; batch nullifiers roll back on revert; state machine has no reachable-but-exitless

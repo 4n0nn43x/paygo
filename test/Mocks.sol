@@ -6,7 +6,15 @@ import {INativeQueryVerifier, IChainInfo} from "../contracts/Attestcoin.sol";
 
 /// @dev A contract with no `receive`/payable `fallback` — stands in for the class of recipient
 ///      (bespoke multisig, vault, minimal account contract) that can never accept a bare `.call{value}`.
-contract NonPayable {}
+contract NonPayable {
+    /// @dev Lets the wallet act as a seller (approve + createOrder) while still being unable to ACCEPT a
+    ///      bare value transfer — `receive`/`fallback` are what a payout needs, not what a call needs.
+    function exec(address target, uint256 value, bytes calldata data) external returns (bytes memory) {
+        (bool ok, bytes memory ret) = target.call{value: value}(data);
+        require(ok, "exec failed");
+        return ret;
+    }
+}
 
 /// @dev An asset that accepts exactly one transfer (the deposit leg, seller → escrow, at createOrder)
 ///      then always reverts — simulates a buggy/hostile seller-supplied ERC-721. Used to prove

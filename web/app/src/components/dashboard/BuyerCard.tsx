@@ -66,6 +66,13 @@ export function BuyerCard({ cfg, me, log, order, reload }: {
         list.push({ orderId: String(order.id), installmentNo: i, token: cfg.usdc, payee: order.payee, amount: value.toString(), from: me, validAfter, validBefore, v: sig.v, r: sig.r, s: sig.s });
       }
       const r = await (await fetch('/authorizations', { method: 'POST', body: JSON.stringify(list) })).json();
+      // Never tell the buyer they are covered when they are not: a rejected or empty batch means no
+      // installment will pay itself, and a late payment never cures.
+      if (r.error || !r.accepted) {
+        setOut(<><span className="bad">Autopay was NOT armed{r.error ? ': ' + r.error : ''}.</span> Pay each installment yourself, or retry.</>);
+        log('autopay refused: ' + (r.error ?? 'nothing accepted'), 'bad');
+        return;
+      }
       setOut(<><span className="ok">{r.accepted} authorizations signed and handed to the relayer.</span> Close your laptop: installments pay themselves every {gap}s and get proven on Creditcoin.</>);
       log('autopay armed: ' + r.accepted + ' installments', 'ok');
     } catch (e) { setOut(errMsg(e)); }

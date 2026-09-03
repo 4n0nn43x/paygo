@@ -24,7 +24,12 @@ contract CreditPassport is Soulbound {
         require(msg.sender == escrow, "escrow only");
         _mintOnFirstFact(buyer);
         Record storage r = records[buyer];
-        if (ok) { r.honored++; r.volume += amount; } else r.defaulted++;
+        // SC-AUDIT-08: `volume` is informational and never gates `depositBps`, but `amount` is unbounded
+        // attacker input (an allowlisted payToken may have an unbounded `mint`). A checked `+=` lets anyone
+        // pin a victim's volume at max and panic every later settle naming them. Saturate: no wider type
+        // fixes this, only refusing to revert does.
+        if (ok) { r.honored++; unchecked { uint256 v = r.volume + amount; r.volume = v < r.volume ? type(uint256).max : v; } }
+        else r.defaulted++;
         emit Fact(buyer, ok, amount);
     }
 

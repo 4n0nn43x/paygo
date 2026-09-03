@@ -353,18 +353,24 @@ contract PayGoEscrowTest is Test {
         assertEq(confirmed, 1); assertEq(disputed, 0);
     }
 
-    function test_custody_mismatchedChipSlashesBondToBuyer() public {
+    // SC-AUDIT-04: a mismatch pays NOBODY. A "chip" is a keypair, so any buyer can generate one and
+    // manufacture a mismatch for free — paying them the bond would be a bounty on lying. Only a match is a
+    // positive proof. The seller who really swapped the item still loses the bond; the buyer gains nothing.
+    function test_custody_mismatchedChipBurnsBondAndPaysNobody() public {
         settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, CHIP, 0, seller), 50);          // Origin: real chip, real seller
-        address swappedChip = address(0xBAD1D);
-        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, swappedChip, 1, buyer), 51);   // Delivery: different chip, real buyer
+        address forgedChip = address(0xBAD1D);
+        settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, forgedChip, 1, buyer), 51);    // Delivery: any other key, real buyer
         assertTrue(esc.getOrder(orderId).custodyDisputed);
-        assertEq(esc.bondRecipient(orderId), buyer);
+        assertEq(esc.bondRecipient(orderId), address(0xdEaD), "the bond resolves to the burn address");
 
         esc.withdrawBond(orderId);
         uint256 before = buyer.balance;
         vm.prank(buyer);
+        vm.expectRevert("nothing claimable");
         esc.claimBond();
-        assertEq(buyer.balance, before + 1 ether);
+        assertEq(buyer.balance, before, "no profit motive for forging a mismatch");
+        assertEq(esc.claimableBond(address(0xdEaD)), 1 ether, "stranded: claimBond pays msg.sender, nobody is 0xdEaD");
+        assertEq(esc.claimableBond(seller), 0, "and the seller does not get it back either");
 
         (uint32 confirmed, uint32 disputed) = esc.sellerPassport().records(seller);
         assertEq(confirmed, 0); assertEq(disputed, 1);
@@ -416,15 +422,17 @@ contract PayGoEscrowTest is Test {
     // per-order resolution — `withdrawBond` always finalizes; only the pull (`claimBond`) can fail, and
     // only for its own caller.
     function test_claimBond_nonPayableRecipientDoesNotBrickResolution() public {
+        // Since SC-AUDIT-04 only the seller leg ever pays a real party, so that is where a recipient which
+        // cannot accept native value still matters: an ordinary smart-contract wallet listing an order.
         NonPayable np = new NonPayable();
-        vm.deal(seller, 10 ether);
-        vm.startPrank(seller);
-        uint256 t2 = nft.mint(seller);
-        nft.approve(address(esc), t2);
-        uint256 id2 = esc.createOrder{value: 1 ether}(address(np), nft, t2, PAYEE, USDC, 100e6, 4, 40_000, 1000);
-        vm.stopPrank();
-        settleCustodyOne(40_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), id2, CHIP, 0, seller), 60);
-        settleCustodyOne(40_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), id2, address(0xBAD1D), 1, address(np)), 61);
+        vm.deal(address(np), 10 ether);
+        uint256 t2 = nft.mint(address(np));
+        np.exec(address(nft), 0, abi.encodeWithSignature("approve(address,uint256)", address(esc), t2));
+        uint256 id2 = abi.decode(np.exec(address(esc), 1 ether, abi.encodeWithSignature(
+            "createOrder(address,address,uint256,address,address,uint256,uint8,uint64,uint64)",
+            buyer, address(nft), t2, PAYEE, USDC, uint256(100e6), uint8(4), uint64(40_000), uint64(1000))), (uint256));
+        settleCustodyOne(40_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), id2, CHIP, 0, address(np)), 60);
+        settleCustodyOne(40_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), id2, CHIP, 1, buyer), 61);   // match
         assertEq(esc.bondRecipient(id2), address(np));
         esc.withdrawBond(id2);                                  // resolution succeeds regardless of np's payability
         assertEq(esc.claimableBond(address(np)), 1 ether);
@@ -448,6 +456,90 @@ contract PayGoEscrowTest is Test {
 
         vm.prank(seller);
         esc.createOrder(buyer, nft, t, PAYEE, USDC, 100e6, 4, 40_000, 1000);   // waived: no value sent, no revert
+    }
+
+    // ---- v5 security pass (docs/AUDIT.md SC-AUDIT-05/06/07/08)
+
+    // SC-AUDIT-05: terminal statuses are absorbing, so a release used to be replayable. Once the same token
+    // is escrowed again by a later order, replaying the old order's release drains the NEW order's collateral.
+    function test_withdrawAsset_cannotBeReplayedAfterTheAssetIsRelisted() public {
+        MockChainInfo(CHAIN_INFO).setHeight(20_000);
+        esc.declareDefault(orderId);
+        vm.roll(block.number + CURE + 1);
+        esc.finalizeDefault(orderId);
+        esc.withdrawAsset(orderId);                                  // the normal repossession flow
+        assertEq(nft.ownerOf(1), seller);
+
+        address buyer2 = address(0xB0B2);                            // seller re-lists the SAME token
+        vm.startPrank(seller);
+        nft.approve(address(esc), 1);
+        uint256 id2 = esc.createOrder{value: 1 ether}(buyer2, nft, 1, PAYEE, USDC, 100e6, 4, 30_000, 1000);
+        vm.stopPrank();
+        assertEq(nft.ownerOf(1), address(esc));
+
+        vm.expectRevert("already released");
+        esc.withdrawAsset(orderId);
+        assertEq(nft.ownerOf(1), address(esc), "order 2's collateral is untouched");
+        assertEq(uint8(esc.getOrder(id2).status), uint8(PayGoEscrow.Status.Active));
+    }
+
+    // SC-AUDIT-05, buyer leg: a past buyer who re-sells could pull the token back out of the new escrow.
+    function test_claimAsset_cannotBeReplayedAfterTheAssetIsRelisted() public {
+        for (uint8 i; i < 4; i++) settleOne(10_000 + uint64(i) * 1000, goodTx(i), i);
+        esc.claimAsset(orderId);
+        assertEq(nft.ownerOf(1), buyer);
+
+        address buyer2 = address(0xB0B2);
+        vm.deal(buyer, 10 ether);
+        vm.startPrank(buyer);
+        nft.approve(address(esc), 1);
+        uint256 id2 = esc.createOrder{value: 1 ether}(buyer2, nft, 1, PAYEE, USDC, 100e6, 4, 30_000, 1000);
+        vm.stopPrank();
+
+        vm.expectRevert("already released");
+        esc.claimAsset(orderId);
+        assertEq(nft.ownerOf(1), address(esc));
+        assertEq(uint8(esc.getOrder(id2).status), uint8(PayGoEscrow.Status.Active));
+    }
+
+    // SC-AUDIT-07: an unwritten order reads status Active with deadline 0, so the id of a future order could
+    // be driven to Defaulted before it existed — and createOrder never resets the lifecycle fields.
+    function test_declareDefault_rejectsUnknownOrder() public {
+        uint256 futureId = esc.nextOrderId();
+        vm.expectRevert("unknown order");
+        esc.declareDefault(futureId);
+
+        uint256 t = nft.mint(seller);
+        vm.startPrank(seller);
+        nft.approve(address(esc), t);
+        uint256 id = esc.createOrder{value: 1 ether}(buyer, nft, t, PAYEE, USDC, 100e6, 4, 30_000, 1000);
+        vm.stopPrank();
+        assertEq(id, futureId);
+        assertEq(uint8(esc.getOrder(id).status), uint8(PayGoEscrow.Status.Active), "born Active, not closed");
+    }
+
+    // SC-AUDIT-06: an unbounded schedule made deadline() panic inside _applyLog's filter chain, turning a
+    // non-applicable log back into a batch-reverting poison log and leaving the order exitless.
+    function test_createOrder_rejectsScheduleOverflowingUint64() public {
+        uint256 t = nft.mint(seller);
+        vm.startPrank(seller);
+        nft.approve(address(esc), t);
+        vm.expectRevert("schedule overflows uint64");
+        esc.createOrder{value: 1 ether}(buyer, nft, t, PAYEE, USDC, 100e6, 2, type(uint64).max - 615, 1000);
+        vm.stopPrank();
+    }
+
+    // SC-AUDIT-08: `volume` is informational, but a checked += let anyone pin it at max and panic every
+    // later settle naming that buyer. Saturating keeps the facts flowing.
+    function test_passport_volumeSaturatesInsteadOfBrickingTheBuyer() public {
+        CreditPassport p = esc.passport();
+        vm.startPrank(address(esc));
+        p.record(buyer, true, type(uint256).max);
+        p.record(buyer, true, 1);                                    // a checked += would panic here
+        vm.stopPrank();
+        (uint32 honored,, uint256 volume) = p.records(buyer);
+        assertEq(volume, type(uint256).max);
+        assertEq(honored, 2, "the payment fact is still recorded");
     }
 
     function test_passport_isSoulbound() public {

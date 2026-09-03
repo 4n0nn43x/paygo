@@ -20,6 +20,14 @@ contract PayGoEscrow {
         keccak256("InstallmentPaid(address,uint256,uint8,address,address,address,uint256)");
     bytes32 constant CUSTODY_SIG =
         keccak256("PossessionAttested(address,uint256,address,uint8,address)");
+    /// @dev A mismatched Delivery scan resolves the bond here, where nobody can ever pull it (`claimBond`
+    ///      pays `msg.sender`). Paying it to the buyer would put a bounty on lying: a "chip" is just a
+    ///      keypair, so any buyer can generate one and manufacture a mismatch for free. Only a MATCH is a
+    ///      positive proof; a non-match proves only that someone signed with some other key. Burning keeps
+    ///      the deterrent against a seller who really swapped the item while removing the buyer's profit
+    ///      motive. Residual: a buyer can still destroy the bond and brand the seller for one Sepolia tx,
+    ///      with nothing to gain — griefing, not theft. See docs/AUDIT.md SC-AUDIT-04.
+    address constant BURN = 0x000000000000000000000000000000000000dEaD;
 
     enum Status { Active, DefaultAsserted, Defaulted, Completed }
 
@@ -59,6 +67,7 @@ contract PayGoEscrow {
     mapping(address => bool) public allowedPayTokens;      // vetted ERC-20 payTokens only — same reasoning as allowedAssets
     mapping(uint256 => uint256) public custodyBond;       // native CTC staked by the seller at createOrder
     mapping(uint256 => address) public bondRecipient;     // set once resolved; withdrawBond credits this address
+    mapping(uint256 => bool) public released;             // SC-AUDIT-05: the asset leg of an order pays out ONCE
     mapping(address => uint256) public claimableBond;      // pooled, pulled by claimBond — SC-AUDIT-02
     CreditPassport public immutable passport;            // soulbound facts, written here, read by createOrder
     SellerPassport public immutable sellerPassport;       // soulbound custody facts, read by createOrder
@@ -123,6 +132,12 @@ contract PayGoEscrow {
     ) external payable returns (uint256 id) {
         require(n > 0 && n <= 64 && price >= n, "1..64 installments, price >= n");
         require(firstDeadline % EPOCH == 0 && interval % EPOCH == 0 && interval > 0, "not epoch-aligned");
+        // SC-AUDIT-06: `deadline()` is checked uint64 arithmetic reached from inside `_applyLog`'s filter
+        // chain. An unbounded schedule would make it PANIC there instead of returning — turning a
+        // non-applicable log back into a batch-reverting poison log (the very thing MEDIUM-1 fixed) and
+        // leaving the order exitless, since `declareDefault` computes the same expression.
+        require(uint256(firstDeadline) + uint256(n) * uint256(interval) + uint256(GRACE) <= type(uint64).max,
+            "schedule overflows uint64");
         require(buyer != msg.sender && buyer != address(0), "no self-dealing");   // trivial passport-sybil gate
         require(allowedAssets[address(asset)], "asset not allowlisted");
         require(allowedPayTokens[payToken], "payToken not allowlisted");   // SC-AUDIT-01: was the enabler for a fake-token DoS
@@ -262,8 +277,9 @@ contract PayGoEscrow {
     }
 
     /// @dev role 0 = Origin (binds the order's chip, first attestation wins); role 1 = Delivery (compares
-    ///      against the bound chip). A mismatch is slashed to the buyer immediately — no jury needed,
-    ///      it's a cryptographic contradiction, not a subjective claim.
+    ///      against the bound chip). A MATCH is a positive proof — only the genuine chip can produce it —
+    ///      and releases the bond to the seller. A mismatch is NOT the mirror image: any buyer can sign with
+    ///      a key they generated, so it proves nothing about the item and pays nobody (see `BURN`).
     ///      SC-AUDIT-03 (Variant A): `submitter` is CustodyRouter's real, unspoofable `msg.sender` — it
     ///      MUST be checked against `o.seller`/`o.buyer`, or any third party can squat the Origin slot
     ///      with a throwaway chip before the real seller's real chip ever attests, later causing an
@@ -297,7 +313,7 @@ contract PayGoEscrow {
                 emit AuthenticityConfirmed(id, chip, height);
             } else {
                 o.custodyDisputed = true;
-                bondRecipient[id] = o.buyer;
+                bondRecipient[id] = BURN;                  // SC-AUDIT-04: a mismatch is not evidence — nobody is paid
                 sellerPassport.record(o.seller, false);
                 emit AuthenticityDisputed(id, o.chipId, chip, height);
             }
@@ -348,6 +364,10 @@ contract PayGoEscrow {
     ///         Permissionless, no oracle: the clock is ChainInfo's latest attested height.
     function declareDefault(uint256 id) external {
         Order storage o = orders[id];
+        // SC-AUDIT-07: an unwritten order reads status Active (enum 0) with deadline 0, so without this the
+        // id of a FUTURE order can be pushed to Defaulted before it exists — `createOrder` never resets the
+        // lifecycle fields, so the order would be born closed. Mirrors `_applyCustodyLog`'s existence check.
+        require(o.seller != address(0), "unknown order");
         require(o.status == Status.Active, "not active");
         uint8 k;
         while (paid[id][k]) k++;                                          // paidCount < n so this terminates
@@ -379,6 +399,8 @@ contract PayGoEscrow {
     function claimAsset(uint256 id) external {
         Order storage o = orders[id];
         require(o.status == Status.Completed, "not completed");
+        require(!released[id], "already released");   // SC-AUDIT-05: terminal status is absorbing, so without
+        released[id] = true;                          // this the call replays once the token is re-escrowed
         o.asset.transferFrom(address(this), o.buyer, o.tokenId);
         emit AssetClaimed(id, o.buyer);
     }
@@ -387,6 +409,8 @@ contract PayGoEscrow {
     function withdrawAsset(uint256 id) external {
         Order storage o = orders[id];
         require(o.status == Status.Defaulted, "not defaulted");
+        require(!released[id], "already released");   // SC-AUDIT-05, seller leg — same replay, same fix
+        released[id] = true;
         o.asset.transferFrom(address(this), o.seller, o.tokenId);
         emit AssetWithdrawn(id, o.seller);
     }

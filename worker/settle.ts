@@ -8,7 +8,7 @@
 //   4. serves the built web/dist (Vite: web/app -> landing at /, dashboard at /dashboard/) + a tiny
 //      JSON API (POST /authorizations, GET /state) for the checkout
 import 'dotenv/config';
-import { Contract, JsonRpcProvider, Wallet } from 'ethers';
+import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, verifyTypedData } from 'ethers';
 import { proofProvider } from '@gluwa/usc-sdk';
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -26,6 +26,8 @@ const ROUTER_ABI = [
 ];
 const CUSTODY_ROUTER_ABI = ['event PossessionAttested(address indexed escrow,uint256 indexed orderId,address chip,uint8 role,address submitter)'];
 const ESCROW_ABI = [
+  'function getOrder(uint256) view returns (tuple(address seller,address buyer,address asset,uint256 tokenId,address payee,address payToken,uint64 firstDeadline,uint64 interval,uint8 n,uint8 paidCount,uint8 disputedNo,uint8 status,uint64 assertedAt,uint64 closedAt,address chipId,bool custodyVerified,bool custodyDisputed,uint256[] amounts))',
+  'function paid(uint256,uint8) view returns (bool)',
   'function settle(uint64[] heights,bytes[] txs,(bytes32 root,(bytes32 hash,bool isLeft)[] siblings)[] proofs,(bytes32 lowerEndpointDigest,bytes32[] roots) continuity)',
   'function settleCustody(uint64[] heights,bytes[] txs,(bytes32 root,(bytes32 hash,bool isLeft)[] siblings)[] proofs,(bytes32 lowerEndpointDigest,bytes32[] roots) continuity)',
 ];
@@ -38,6 +40,23 @@ const router = new Contract(env('ROUTER_ADDRESS'), ROUTER_ABI, sepWallet);
 const custodyRouter = process.env.CUSTODY_ROUTER_ADDRESS ? new Contract(process.env.CUSTODY_ROUTER_ADDRESS, CUSTODY_ROUTER_ABI, sepWallet) : undefined;
 const escrow = new Contract(env('ESCROW_ADDRESS'), ESCROW_ABI, ccWallet);
 const prover = new proofProvider.service.ProofBuilder(CHAIN_KEY, env('PROOF_BUILDER_URL'));
+// EIP-712 domain of the payToken, read from the token itself (ERC-5267) so nothing is hardcoded.
+const TOKEN_ABI = ['function eip712Domain() view returns (bytes1,string,string,uint256,address,bytes32,uint256[])'];
+const AUTH_TYPES = { ReceiveWithAuthorization: [
+  { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+  { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+] };
+let domainCache: Record<string, any> = {};
+async function tokenDomain(token: string) {
+  if (!domainCache[token]) {
+    const [, name, version, chainId, verifyingContract] = await new Contract(token, TOKEN_ABI, sepolia).eip712Domain();
+    domainCache[token] = { name, version, chainId, verifyingContract };
+  }
+  return domainCache[token];
+}
+/** The routing-bound nonce the Router recomputes (PayGoRouter.authNonce) — the signature commits to it. */
+const authNonce = (escrow: string, orderId: string, installmentNo: number, payee: string) =>
+  keccak256(AbiCoder.defaultAbiCoder().encode(['address', 'uint256', 'uint8', 'address'], [escrow, orderId, installmentNo, payee]));
 
 type Pending = { hash: string; height: number };
 type Auth = { orderId: string; installmentNo: number; token: string; payee: string; amount: string;
@@ -58,6 +77,12 @@ async function autopay() {
     if (a.txHash || a.error || a.validAfter >= now) continue;
     if (a.validBefore <= now) { a.error = 'expired'; save(); continue; }
     try {
+      // An EIP-3009 authorization has no idea the order it was signed for is over: the token would happily
+      // move the installment after a default. The relayer will not be the one to do it. (A malicious seller
+      // can still submit directly — that is what TestUSDC.cancelAuthorization is for.)
+      const o = await escrow.getOrder(a.orderId);
+      if (Number(o.status) === 2 || Number(o.status) === 3) { a.error = 'order closed'; save(); continue; }
+      if (await escrow.paid(a.orderId, a.installmentNo)) { a.error = 'installment already settled'; save(); continue; }
       const tx = await router.payWithAuthorization(env('ESCROW_ADDRESS'), a.orderId, a.installmentNo, a.token, a.payee, a.amount,
         { from: a.from, validAfter: a.validAfter, validBefore: a.validBefore, v: a.v, r: a.r, s: a.s });
       a.txHash = tx.hash; save();
@@ -104,7 +129,8 @@ async function settleBatch(l: Lane, batch: Pending[]) {
   for (const [h, m] of res.data.merkleProofs) for (const [, e] of m) { heights.push(h); txs.push(e.txBytes); proofs.push(e.merkleProof); }
   const args = [heights, txs, proofs, res.data.continuityProof];
   await escrow[l.method].staticCall(...args);          // one rotten proof would revert the whole batch
-  const tx = await escrow[l.method](...args, { gasLimit: 2_000_000 });
+  const est = await escrow[l.method].estimateGas(...args);   // a fixed cap silently OOGs on a big receipt
+  const tx = await escrow[l.method](...args, { gasLimit: (est * 13n) / 10n });
   console.log(`${l.method} ${heights.length} tx → ${tx.hash}`);
   const rc = await tx.wait();
   console.log(`  mined, gas=${rc.gasUsed} (${(Number(rc.gasUsed) / heights.length).toFixed(0)} per tx)`);
@@ -158,13 +184,17 @@ createServer((req, res) => {
     router: env('ROUTER_ADDRESS'), custodyRouter: process.env.CUSTODY_ROUTER_ADDRESS, escrow: env('ESCROW_ADDRESS'),
     usdc: process.env.USDC_ADDRESS, asset: process.env.ASSET_ADDRESS,
     chainKey: CHAIN_KEY, sepoliaRpc: env('SOURCE_CHAIN_RPC_URL'), ccRpc: env('CREDITCOIN_RPC_URL'),
-    pending: state.pending, autopay: state.autopay, settles: state.settles, done: state.done.length,
+    pending: state.pending,
+    // the signature itself is not published: it is needed to SUBMIT an installment, and a submitted
+    // authorization survives the order it was signed for (SC-AUDIT-09)
+    autopay: state.autopay.map(({ v, r, s, ...rest }) => rest),
+    settles: state.settles, done: state.done.length,
     custodyPending: state.custodyPending, custodyDone: state.custodyDone.length,
   });
   if (req.method === 'POST' && req.url === '/authorizations') {
     let body = ''; let tooBig = false;
     req.on('data', c => { body += c; if (body.length > 64_000) { tooBig = true; req.destroy(); } });
-    req.on('end', () => {
+    req.on('end', async () => {
       if (tooBig) return json(413, { error: 'too large' });
       try {
         const raw = JSON.parse(body);
@@ -177,11 +207,27 @@ createServer((req, res) => {
             && Number.isInteger(a.installmentNo) && a.installmentNo >= 0 && a.installmentNo < 64
             && Number.isInteger(a.v) && Number.isInteger(a.validAfter) && Number.isInteger(a.validBefore)
             && /^[0-9]+$/.test(String(a.orderId)) && /^[0-9]+$/.test(String(a.amount)))) return json(400, { error: 'invalid authorization' });
-          const key = `${a.orderId}:${a.installmentNo}:${a.from.toLowerCase()}`;
-          if (state.autopay.some(x => `${x.orderId}:${x.installmentNo}:${x.from.toLowerCase()}` === key)) continue;   // dedup
+          // Shapes are not consent. Recover the signature: without this anyone could take a buyer's queue
+          // slot with a garbage entry and the buyer's real authorization would be silently dropped by the
+          // dedup below — autopay never fires, and a late payment never cures.
+          const nonce = authNonce(env('ESCROW_ADDRESS'), String(a.orderId), a.installmentNo, a.payee);
+          const value = { from: a.from, to: env('ROUTER_ADDRESS'), value: String(a.amount),
+            validAfter: a.validAfter, validBefore: a.validBefore, nonce };
+          let signer: string;
+          try { signer = verifyTypedData(await tokenDomain(a.token), AUTH_TYPES, value, { v: a.v, r: a.r, s: a.s }); }
+          catch { return json(400, { error: 'unverifiable authorization' }); }
+          if (signer.toLowerCase() !== a.from.toLowerCase()) return json(400, { error: 'signature does not match `from`' });
           clean.push({ orderId: String(a.orderId), installmentNo: a.installmentNo, token: a.token, payee: a.payee,
             amount: String(a.amount), from: a.from, validAfter: a.validAfter, validBefore: a.validBefore, v: a.v, r: a.r, s: a.s });
         }
+        // Drop entries that can never fire again, so a queue slot is never permanently occupied.
+        const now = Math.floor(Date.now() / 1000);
+        state.autopay = state.autopay.filter(x => !x.error && !x.txHash && x.validBefore > now);
+        const slot = (x: Auth) => `${x.orderId}:${x.installmentNo}:${x.from.toLowerCase()}`;
+        for (const a of clean) state.autopay = state.autopay.filter(x => slot(x) !== slot(a));   // a fresh signature wins
+        const from = clean[0]?.from.toLowerCase();
+        if (from && state.autopay.filter(x => x.from.toLowerCase() === from).length + clean.length > 128)
+          return json(429, { error: 'too many pending authorizations for this signer' });
         if (state.autopay.length + clean.length > 1000) return json(429, { error: 'autopay queue full' });
         state.autopay.push(...clean); save(); json(200, { accepted: clean.length });
       } catch (e: any) { json(400, { error: e.message }); }

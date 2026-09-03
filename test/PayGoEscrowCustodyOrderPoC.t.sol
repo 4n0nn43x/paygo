@@ -176,7 +176,7 @@ contract PayGoEscrowCustodyOrderPoC is Test {
     // resubmitted in a brand-new Ethereum transaction by ANYONE (no physical re-scan needed) and
     // proven under a fresh (height, txIndex) once Origin is bound.
     // ============================================================================================
-    function test_refutation_resubmittingSameAttestationInNewTxWinsTheBond() public {
+    function test_refutation_resubmittingSameAttestationStillProvesTheMismatch() public {
         // 1. Same griefing setup: delivery proof swallowed, seller binds a self-serving Origin.
         settleCustodyOne(10_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, realChip, 1, buyer), 50);
         settleCustodyOne(10_001, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, sellerChip, 0, seller), 51);
@@ -189,18 +189,25 @@ contract PayGoEscrowCustodyOrderPoC is Test {
         //    That gives a fresh (height, txIndex) never seen by the nullifier map before.
         settleCustodyOne(20_000, encodeCustodyTx(CUSTODY_ROUTER, address(esc), orderId, realChip, 1, buyer), 999);
 
-        // 3. This time Origin is bound, so the mismatch resolves correctly.
+        // 3. This time Origin is bound, so the mismatch registers — the griefing cost one extra tx, not the
+        //    permanent loss of the buyer's evidence, which is what the refutation is about.
         PayGoEscrow.Order memory o = esc.getOrder(orderId);
         assertTrue(o.custodyDisputed, "refutation: resubmission DOES prove the mismatch");
-        assertEq(esc.bondRecipient(orderId), buyer);
 
-        // 4. Order completes on payments; bond goes to the BUYER, not the seller, despite the earlier griefing.
+        // 4. Since SC-AUDIT-04 the mismatch pays nobody: the seller does not get the bond back either, and
+        //    the seller's custody record carries the dispute for good. What the buyer recovers is the ability
+        //    to register the fact, not a payout — a mismatch is not a positive proof and never buys anything.
+        assertEq(esc.bondRecipient(orderId), address(0xdEaD), "mismatch resolves to the burn address");
+        (, uint32 disputed) = esc.sellerPassport().records(seller);
+        assertEq(disputed, 1, "the seller's custody record carries the dispute");
         for (uint8 i; i < 4; i++) settleOne(10_000 + uint64(i) * 1000, goodTx(i), i);
         vm.roll(block.number + CUSTODY_WINDOW + 1);
         esc.withdrawBond(orderId);
         uint256 before = buyer.balance;
         vm.prank(buyer);
+        vm.expectRevert("nothing claimable");
         esc.claimBond();
-        assertEq(buyer.balance, before + 1 ether, "refutation: bond correctly slashed to buyer after resubmission");
+        assertEq(buyer.balance, before, "no bounty for producing a mismatch");
+        assertEq(esc.claimableBond(address(0xdEaD)), 1 ether, "the bond is stranded, not paid to anyone");
     }
 }

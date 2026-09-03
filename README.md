@@ -30,34 +30,36 @@ forge test
 npm run build:web   # builds web/app -> web/dist, served by the worker at / (landing) and /dashboard/ (checkout)
 ```
 
-## Deployed (CC3 testnet / Sepolia, 2026-08-31)
+## Deployed (CC3 testnet / Sepolia, 2026-09-03 — **v5**)
 
 | Contract | Chain | Address |
 |---|---|---|
-| PayGoRouter | Sepolia | `0x912Fd5a73AA2d1b56f14F2e8B1cC17F2Cfc7327F` |
-| CustodyRouter | Sepolia | `0x9AFa2dFAe36380D45524a0Fd520FeB806CAE38c5` |
-| TestUSDC (permit + EIP-3009) | Sepolia | `0x3b332374E1F564b57d3A6f7dDe33e13030BD8895` |
-| PayGoEscrow (chainKey 1, grace 2000, cure 240, custody window 240) | Creditcoin CC3 | `0xD0B9c4c67c542e18B7EA556BbbAE3E0Eb2637878` |
-| DemoAsset (mint + mintWithMeta, real tokenURI) | Creditcoin CC3 | `0xCAb49452967b2d9671cB75BFb947E715B0B6cFB1` |
-| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x675d81526DF8ae5F7654F0949B8Cf7Ea6Aa668A3` |
-| SellerPassport (auto-deployed by escrow) | Creditcoin CC3 | `0xA30C9538C168CB6A54908E31E52BeB9Ec4930aD4` |
+| PayGoRouter | Sepolia | `0x083f9B08a2D2D392A8adcfdD3dDE479D71243e6e` |
+| CustodyRouter | Sepolia | `0x7445286394fc27DF8E6b4455694A098A63887A0e` |
+| TestUSDC (permit + EIP-3009 + cancelAuthorization) | Sepolia | `0xb25E65CA2650F9B4ce9C2B91A550EC85Bd3C3228` |
+| PayGoEscrow (chainKey 1, grace 2000, cure 240, custody window 240) | Creditcoin CC3 | `0x2D386703638C4f326f2CF27245F452E93585Ad8a` |
+| DemoAsset (mint + mintWithMeta, real tokenURI) | Creditcoin CC3 | `0x205E75Bd48FB37B0489968D9A762b5D585a5ba77` |
+| CreditPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x2ad374C7AD03ec6e7e8677844E8c9581C7e1D697` |
+| SellerPassport (auto-deployed by escrow) | Creditcoin CC3 | `0x2b83a8AaCD93cEE5717d248D8995D68633dA6236` |
 
-**v4** — adds real on-chain tokenURI metadata to `DemoAsset` (`mintWithMeta`: name/description/image,
-JSON-escaped; plain `mint` unchanged, zero breaking change to any existing caller). Everything from v3
-(post-security-pass: asset/payToken allowlists, the pull-pattern `claimAsset`/`withdrawAsset`/
-`withdrawBond`+`claimBond` split, Proof-of-Custody, the three `audit/findings/` fixes — see
-`docs/AUDIT.md`) carries forward unchanged.
-Verified on-chain post-deploy: constructor immutables, both allowlists, the two child passport
-contracts, and `DemoAsset`'s new `tokenURI` (correctly reverts `ERC721NonexistentToken` for an unminted
-id — matches `test/DemoAsset.t.sol`). Same deployer nonce ordering (Router/CustodyRouter/TestUSDC on
-Sepolia, then DemoAsset/Escrow on Creditcoin) as prior deploys; the escrow check
-`topics[1] == address(this)` still namespaces orders per deployment — orders from earlier deployments
-do not carry over to v4's contract state.
+**v5 — second independent security pass.** Four hunters and three refuters over the whole surface
+(`docs/AUDIT.md`, second pass). Six findings fixed, each with a regression test:
 
-**Source is ahead of v4 (2026-09-03)** — `withdrawBond` now also times out **Defaulted** orders to the
-seller (a buyer who never paid and never scanned used to strand the seller's bond forever, see
-`docs/AUDIT.md`); `Order.completedAt` is renamed `closedAt`; the two passports share `Soulbound.sol`.
-Redeploy with `sh script/deploy.sh` before the next live demo — until then the addresses above run v4.
+| # | Severity | What |
+|---|---|---|
+| SC-AUDIT-05 | Critical | asset release replayed once the same token was re-escrowed, draining the next order's collateral |
+| SC-AUDIT-06 | High | an unbounded schedule made `deadline()` panic *inside* the filter chain, re-opening the poison-log DoS |
+| SC-AUDIT-07 | High | `declareDefault` accepted an order id that did not exist yet, so future orders were born closed |
+| SC-AUDIT-04 | High | a chip mismatch paid the buyer — a bounty on lying, since a chip is just a keypair. It now pays nobody |
+| SC-AUDIT-09 | Medium | pre-signed installments outlived their order; `TestUSDC` now has EIP-3009 `cancelAuthorization` |
+| SC-AUDIT-10 | Medium-High | the relayer's autopay queue accepted unsigned entries and could be slot-poisoned |
+
+Verified on-chain after deploy: constructor immutables, both allowlists, the two child passports,
+`released(1) == false` (the new SC-AUDIT-05 storage), `declareDefault(1)` reverting `unknown order`
+(SC-AUDIT-07), and `TestUSDC.CANCEL_AUTHORIZATION_TYPEHASH` matching the EIP-3009 spec (SC-AUDIT-09).
+The escrow check `topics[1] == address(this)` still namespaces orders per deployment, so nothing from v4
+carries over. Everything from v4 (on-chain asset metadata) and v3 (allowlists, pull-pattern releases,
+Proof-of-Custody) carries forward unchanged.
 
 ## Demo (CLI)
 
