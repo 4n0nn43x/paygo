@@ -398,6 +398,20 @@ contract PayGoEscrowTest is Test {
         assertEq(seller.balance, before + 1 ether);
     }
 
+    // A buyer who never pays and never scans must not strand the seller's bond: a Defaulted order times
+    // out to the seller exactly like a Completed one (silence is not evidence against the seller).
+    function test_withdrawBond_timeoutAfterDefaultFavorsSeller() public {
+        MockChainInfo(CHAIN_INFO).setHeight(20_000);
+        esc.declareDefault(orderId);
+        vm.roll(block.number + CURE + 1);
+        esc.finalizeDefault(orderId);
+        vm.expectRevert("not resolved");
+        esc.withdrawBond(orderId);                              // custody window not over yet
+        vm.roll(block.number + CUSTODY_WINDOW + 1);
+        esc.withdrawBond(orderId);
+        assertEq(esc.claimableBond(seller), 1 ether);
+    }
+
     // SC-AUDIT-02 regression: a recipient that can't accept a bare value transfer must not brick the
     // per-order resolution — `withdrawBond` always finalizes; only the pull (`claimBond`) can fail, and
     // only for its own caller.

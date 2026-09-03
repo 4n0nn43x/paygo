@@ -37,7 +37,7 @@ contract PayGoEscrow {
         uint8 disputedNo;      // installment named by declareDefault
         Status status;
         uint64 assertedAt;     // Creditcoin block of declareDefault
-        uint64 completedAt;    // Creditcoin block the order reached Completed (custody dispute window)
+        uint64 closedAt;       // Creditcoin block the order closed (Completed or Defaulted): starts the custody dispute window
         address chipId;        // Proof-of-Custody: the chip bound at the Origin attestation (0 = unbound)
         bool custodyVerified;  // Delivery chip matched the Origin chip
         bool custodyDisputed;  // Delivery chip did NOT match — cryptographic proof of substitution
@@ -49,7 +49,7 @@ contract PayGoEscrow {
     address public immutable CUSTODY_ROUTER; // CustodyRouter on the source chain (Proof-of-Custody)
     uint64 public immutable GRACE;         // Ethereum blocks after a deadline before default may be asserted
     uint64 public immutable CURE_WINDOW;   // Creditcoin blocks to prove an on-time payment after assertion
-    uint64 public immutable CUSTODY_WINDOW; // Creditcoin blocks after Completed before an unresolved bond reverts to the seller
+    uint64 public immutable CUSTODY_WINDOW; // Creditcoin blocks after the order closed (Completed or Defaulted) before an unresolved bond reverts to the seller
 
     uint256 public nextOrderId = 1;
     mapping(uint256 => Order) internal orders;
@@ -171,18 +171,31 @@ contract PayGoEscrow {
         INativeQueryVerifier.MerkleProof[] calldata proofs,
         INativeQueryVerifier.ContinuityProof calldata continuity
     ) external {
+        _verifyBatch(heights, txs, proofs, continuity, "");
+        // 3-5. receipt status, emitter, fields
+        for (uint256 i; i < heights.length; i++) _apply(heights[i], txs[i]);
+    }
+
+    /// @dev Checks 1-2, shared by `settle` and `settleCustody`. `salt` domain-separates the nullifier
+    ///      namespaces ("" for payments, "custody" for chip attestations) so the same (height, txIndex)
+    ///      pair can never collide across the two proof kinds, even if a future tx carried both event types.
+    function _verifyBatch(
+        uint64[] calldata heights,
+        bytes[] calldata txs,
+        INativeQueryVerifier.MerkleProof[] calldata proofs,
+        INativeQueryVerifier.ContinuityProof calldata continuity,
+        bytes memory salt
+    ) internal {
         uint256 len = heights.length;
         require(len > 0 && len == txs.length && len == proofs.length, "length");
         // 1. nullifier FIRST — the precompile happily verifies the same proof twice
         for (uint256 i; i < len; i++) {
-            bytes32 key = keccak256(abi.encodePacked(CHAIN_KEY, heights[i], VERIFIER.calculateTxIndex(proofs[i])));
+            bytes32 key = keccak256(abi.encodePacked(CHAIN_KEY, heights[i], VERIFIER.calculateTxIndex(proofs[i]), salt));
             require(!processed[key], "replayed");
             processed[key] = true;
         }
         // 2. inclusion + continuity, one call for the whole batch (reverts if invalid)
         require(VERIFIER.verifyAndEmit(CHAIN_KEY, heights, txs, proofs, continuity), "proof");
-        // 3-5. receipt status, emitter, fields
-        for (uint256 i; i < len; i++) _apply(heights[i], txs[i]);
     }
 
     /// @dev A settled batch may bundle txs/logs from many orders; a single non-applicable log must not
@@ -222,7 +235,7 @@ contract PayGoEscrow {
         }
         if (o.paidCount == o.n) {
             o.status = Status.Completed;               // asset released via claimAsset, not pushed here —
-            o.completedAt = uint64(block.number);       // a hostile transferFrom must not brick this shared batch
+            o.closedAt = uint64(block.number);          // a hostile transferFrom must not brick this shared batch
             emit Completed(id);
         }
     }
@@ -237,17 +250,8 @@ contract PayGoEscrow {
         INativeQueryVerifier.MerkleProof[] calldata proofs,
         INativeQueryVerifier.ContinuityProof calldata continuity
     ) external {
-        uint256 len = heights.length;
-        require(len > 0 && len == txs.length && len == proofs.length, "length");
-        // nullifier namespace is domain-separated from settle()'s so the same (height, txIndex) pair can
-        // never collide across the two proof kinds, even if a future tx carried both event types.
-        for (uint256 i; i < len; i++) {
-            bytes32 key = keccak256(abi.encodePacked(CHAIN_KEY, heights[i], VERIFIER.calculateTxIndex(proofs[i]), "custody"));
-            require(!processed[key], "replayed");
-            processed[key] = true;
-        }
-        require(VERIFIER.verifyAndEmit(CHAIN_KEY, heights, txs, proofs, continuity), "proof");
-        for (uint256 i; i < len; i++) _applyCustody(heights[i], txs[i]);
+        _verifyBatch(heights, txs, proofs, continuity, "custody");
+        for (uint256 i; i < heights.length; i++) _applyCustody(heights[i], txs[i]);
     }
 
     function _applyCustody(uint64 height, bytes calldata txBytes) internal {
@@ -301,9 +305,11 @@ contract PayGoEscrow {
     }
 
     /// @notice Resolve the custody bond once eligible: `settleCustody` set the recipient on a chip match
-    ///         or mismatch, or — absent either, past the window after Completed — the presumption favors
-    ///         the seller (Attestcoin can prove a swap happened; it can never prove one didn't, so silence
-    ///         is not evidence against the seller, exactly the polarity the payment side already uses).
+    ///         or mismatch, or — absent either, past the window after the order closed (Completed or
+    ///         Defaulted) — the presumption favors the seller (Attestcoin can prove a swap happened; it can
+    ///         never prove one didn't, so silence is not evidence against the seller, exactly the polarity
+    ///         the payment side already uses). A Defaulted order must time out too, or a buyer who never
+    ///         pays and never scans would strand the seller's bond forever.
     /// @dev SC-AUDIT-02: this used to pay out directly via a raw `.call`, which permanently stranded the
     ///      bond (per-order, unretriable) if the resolved recipient could never accept a bare transfer.
     ///      Split into resolve (here — no external call, can never fail on a bad recipient) and pull
@@ -313,8 +319,8 @@ contract PayGoEscrow {
     function withdrawBond(uint256 id) external {
         Order storage o = orders[id];
         address to = bondRecipient[id];
-        if (to == address(0) && o.status == Status.Completed && !o.custodyDisputed
-            && o.completedAt != 0 && block.number > o.completedAt + CUSTODY_WINDOW) {
+        if (to == address(0) && (o.status == Status.Completed || o.status == Status.Defaulted) && !o.custodyDisputed
+            && o.closedAt != 0 && block.number > o.closedAt + CUSTODY_WINDOW) {
             to = o.seller;
         }
         require(to != address(0), "not resolved");
@@ -360,6 +366,7 @@ contract PayGoEscrow {
         require(o.status == Status.DefaultAsserted, "not asserted");
         require(block.number > o.assertedAt + CURE_WINDOW, "cure window open");
         o.status = Status.Defaulted;                    // asset released via withdrawAsset, not pushed here
+        o.closedAt = uint64(block.number);              // starts the custody window: an unresolved bond returns to the seller
         passport.record(o.buyer, false, 0);
         emit Defaulted(id);
     }

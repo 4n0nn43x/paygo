@@ -1,8 +1,9 @@
 // PayGo worker — a convenience relayer, nothing more: `settle`/`settleCustody` are permissionless,
 // anyone (the buyer included) can submit the same proofs by hand. It does four things:
 //   1. autopay: submits the EIP-3009 authorizations the buyer pre-signed at checkout, when they become valid
-//   2. settle:  listen InstallmentPaid on Sepolia → wait until attested → one batch proof per ≤10 txs /
-//               ≤1000-block window → PayGoEscrow.settle on Creditcoin
+//   2. settle:  listen InstallmentPaid on Sepolia → wait until attested → prove → PayGoEscrow.settle on
+//               Creditcoin. Default: as soon as attested (~10 min). BATCH_WAIT=1: hold one batch proof
+//               per ≤10 txs / ≤1000-block window (cheaper per installment, hours slower)
 //   3. settleCustody: same shape, for CustodyRouter's PossessionAttested (Proof-of-Custody chip scans)
 //   4. serves the built web/dist (Vite: web/app -> landing at /, dashboard at /dashboard/) + a tiny
 //      JSON API (POST /authorizations, GET /state) for the checkout
@@ -66,105 +67,69 @@ async function autopay() {
   }
 }
 
-// ---- 2. settle
-async function collect() {
+// ---- 2/3. settle: one lane per proof kind — payments (Router → settle) and Proof-of-Custody chip
+//      attestations (CustodyRouter → settleCustody). Same pipeline: collect logs → wait attested →
+//      one batch proof per ≤10 txs / ≤1000-block window → escrow call.
+type Lane = { label: string; contract: Contract; event: string; method: 'settle' | 'settleCustody';
+  from: 'fromBlock' | 'custodyFromBlock'; pending: 'pending' | 'custodyPending'; done: 'done' | 'custodyDone' };
+const LANES: Lane[] = [
+  { label: 'payment', contract: router, event: 'InstallmentPaid', method: 'settle', from: 'fromBlock', pending: 'pending', done: 'done' },
+];
+if (custodyRouter) LANES.push({ label: 'custody attestation', contract: custodyRouter, event: 'PossessionAttested', method: 'settleCustody',
+  from: 'custodyFromBlock', pending: 'custodyPending', done: 'custodyDone' });
+
+async function collect(l: Lane) {
   const head = await sepolia.getBlockNumber();
-  if (state.fromBlock === 0) state.fromBlock = head;
-  if (head < state.fromBlock) return;
-  const to = Math.min(head, state.fromBlock + 5000); // ponytail: RPC range cap, raise if your RPC allows
-  const logs = await router.queryFilter('InstallmentPaid', state.fromBlock, to);
-  for (const l of logs) {
-    if (!state.done.includes(l.transactionHash) && !state.pending.some(p => p.hash === l.transactionHash)) {
-      state.pending.push({ hash: l.transactionHash, height: l.blockNumber });
-      console.log(`+ payment ${l.transactionHash} @${l.blockNumber}`);
+  if (state[l.from] === 0) state[l.from] = head;
+  if (head < state[l.from]) return;
+  const to = Math.min(head, state[l.from] + 5000); // ponytail: RPC range cap, raise if your RPC allows
+  const logs = await l.contract.queryFilter(l.event, state[l.from], to);
+  for (const x of logs) {
+    if (!state[l.done].includes(x.transactionHash) && !state[l.pending].some(p => p.hash === x.transactionHash)) {
+      state[l.pending].push({ hash: x.transactionHash, height: x.blockNumber });
+      console.log(`+ ${l.label} ${x.transactionHash} @${x.blockNumber}`);
     }
   }
-  state.fromBlock = to + 1;
+  state[l.from] = to + 1;
   save();
 }
 
-async function settleBatch(batch: Pending[]) {
+async function settleBatch(l: Lane, batch: Pending[]) {
   const top = Math.max(...batch.map(p => p.height));
-  console.log(`waiting attestation of height ${top} (${batch.length} tx)…`);
+  console.log(`waiting attestation of height ${top} (${batch.length} ${l.label} tx)…`);
   await prover.waitUntilHeightAttested(CHAIN_KEY, top, POLL_MS, 30 * 60_000);
   const res = await prover.getBatchProof(batch.map(p => p.hash));
   if (!res.success || !res.data) throw new Error(res.error);
   const heights: number[] = [], txs: string[] = [], proofs: any[] = [];
   for (const [h, m] of res.data.merkleProofs) for (const [, e] of m) { heights.push(h); txs.push(e.txBytes); proofs.push(e.merkleProof); }
   const args = [heights, txs, proofs, res.data.continuityProof];
-  await escrow.settle.staticCall(...args);          // one rotten proof would revert the whole batch
-  const tx = await escrow.settle(...args, { gasLimit: 2_000_000 });
-  console.log(`settle ${heights.length} tx → ${tx.hash}`);
+  await escrow[l.method].staticCall(...args);          // one rotten proof would revert the whole batch
+  const tx = await escrow[l.method](...args, { gasLimit: 2_000_000 });
+  console.log(`${l.method} ${heights.length} tx → ${tx.hash}`);
   const rc = await tx.wait();
-  console.log(`  mined, gas=${rc.gasUsed} (${(Number(rc.gasUsed) / heights.length).toFixed(0)} per installment)`);
-  state.settles.push({ tx: tx.hash, count: heights.length, gas: rc.gasUsed.toString() });
-  state.done.push(...batch.map(p => p.hash));
-  state.pending = state.pending.filter(p => !batch.includes(p));
+  console.log(`  mined, gas=${rc.gasUsed} (${(Number(rc.gasUsed) / heights.length).toFixed(0)} per tx)`);
+  if (l.method === 'settle') state.settles.push({ tx: tx.hash, count: heights.length, gas: rc.gasUsed.toString() });
+  state[l.done].push(...batch.map(p => p.hash));
+  state[l.pending] = state[l.pending].filter(p => !batch.includes(p));
   save();
 }
 
-async function settleLoop() {
-  if (!state.pending.length) return;
-  const sorted = [...state.pending].sort((a, b) => a.height - b.height);
+async function settleLoop(l: Lane) {
+  if (!state[l.pending].length) return;
+  const sorted = [...state[l.pending]].sort((a, b) => a.height - b.height);
   const lo = sorted[0].height;
   const batch = sorted.filter(p => p.height - lo < MAX_RANGE).slice(0, MAX_BATCH);
-  // settle when the window is full, or when the oldest has waited ~one window; otherwise let it fill
-  const head = await sepolia.getBlockNumber();
-  if (!(batch.length === MAX_BATCH || head - lo >= MAX_RANGE || process.env.SETTLE_NOW)) return;
-  try { await settleBatch(batch); }
-  catch (e: any) {
-    console.error('batch failed:', e.shortMessage ?? e.message);
-    if (batch.length > 1) for (const p of batch) { try { await settleBatch([p]); } catch (e2: any) { console.error(`  ${p.hash}: ${e2.shortMessage ?? e2.message}`); } }
+  // default: settle as soon as attested (~10 min after the Sepolia tx). BATCH_WAIT=1 holds the window
+  // until it is full (10 tx) or the oldest has waited ~one window (1000 blocks, ~3h20): cheaper per
+  // installment, hours slower — the measured −51 % figure, not the demo setting.
+  if (process.env.BATCH_WAIT) {
+    const head = await sepolia.getBlockNumber();
+    if (!(batch.length === MAX_BATCH || head - lo >= MAX_RANGE)) return;
   }
-}
-
-// ---- 3. settleCustody (same shape as 2, for CustodyRouter's PossessionAttested)
-async function collectCustody() {
-  if (!custodyRouter) return;
-  const head = await sepolia.getBlockNumber();
-  if (state.custodyFromBlock === 0) state.custodyFromBlock = head;
-  if (head < state.custodyFromBlock) return;
-  const to = Math.min(head, state.custodyFromBlock + 5000);
-  const logs = await custodyRouter.queryFilter('PossessionAttested', state.custodyFromBlock, to);
-  for (const l of logs) {
-    if (!state.custodyDone.includes(l.transactionHash) && !state.custodyPending.some(p => p.hash === l.transactionHash)) {
-      state.custodyPending.push({ hash: l.transactionHash, height: l.blockNumber });
-      console.log(`+ custody attestation ${l.transactionHash} @${l.blockNumber}`);
-    }
-  }
-  state.custodyFromBlock = to + 1;
-  save();
-}
-
-async function settleCustodyBatch(batch: Pending[]) {
-  const top = Math.max(...batch.map(p => p.height));
-  console.log(`waiting attestation of custody height ${top} (${batch.length} tx)…`);
-  await prover.waitUntilHeightAttested(CHAIN_KEY, top, POLL_MS, 30 * 60_000);
-  const res = await prover.getBatchProof(batch.map(p => p.hash));
-  if (!res.success || !res.data) throw new Error(res.error);
-  const heights: number[] = [], txs: string[] = [], proofs: any[] = [];
-  for (const [h, m] of res.data.merkleProofs) for (const [, e] of m) { heights.push(h); txs.push(e.txBytes); proofs.push(e.merkleProof); }
-  const args = [heights, txs, proofs, res.data.continuityProof];
-  await escrow.settleCustody.staticCall(...args);
-  const tx = await escrow.settleCustody(...args, { gasLimit: 2_000_000 });
-  console.log(`settleCustody ${heights.length} tx → ${tx.hash}`);
-  await tx.wait();
-  state.custodyDone.push(...batch.map(p => p.hash));
-  state.custodyPending = state.custodyPending.filter(p => !batch.includes(p));
-  save();
-}
-
-async function custodySettleLoop() {
-  if (!state.custodyPending.length) return;
-  const sorted = [...state.custodyPending].sort((a, b) => a.height - b.height);
-  const lo = sorted[0].height;
-  const batch = sorted.filter(p => p.height - lo < MAX_RANGE).slice(0, MAX_BATCH);
-  const head = await sepolia.getBlockNumber();
-  if (!(batch.length === MAX_BATCH || head - lo >= MAX_RANGE || process.env.SETTLE_NOW)) return;
-  try { await settleCustodyBatch(batch); }
+  try { await settleBatch(l, batch); }
   catch (e: any) {
-    console.error('custody batch failed:', e.shortMessage ?? e.message);
-    if (batch.length > 1) for (const p of batch) { try { await settleCustodyBatch([p]); } catch (e2: any) { console.error(`  ${p.hash}: ${e2.shortMessage ?? e2.message}`); } }
+    console.error(`${l.label} batch failed:`, e.shortMessage ?? e.message);
+    if (batch.length > 1) for (const p of batch) { try { await settleBatch(l, [p]); } catch (e2: any) { console.error(`  ${p.hash}: ${e2.shortMessage ?? e2.message}`); } }
   }
 }
 
@@ -227,7 +192,7 @@ createServer((req, res) => {
     // Vite build (web/app -> web/dist): landing at /, dashboard at /dashboard/, hashed assets in
     // between. No inline script/style anymore (ethers is bundled, not CDN-loaded), so CSP drops
     // 'unsafe-inline' entirely — a tightening, not a relaxation, of the pre-migration policy.
-    const csp = "default-src 'none'; script-src 'self'; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src 'self' https://api.qrserver.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com";
+    const csp = "default-src 'none'; script-src 'self'; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src 'self' data: https://api.qrserver.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com";
     const file = staticFilePath(req.url ?? '/');
     if (file) {
       res.writeHead(200, { 'content-type': mimeType(file), 'x-content-type-options': 'nosniff', 'content-security-policy': csp });
@@ -237,9 +202,12 @@ createServer((req, res) => {
   res.writeHead(404); res.end();
 }).listen(PORT, () => console.log(`checkout UI + API on http://localhost:${PORT}`));
 
+console.log(process.env.BATCH_WAIT ? 'mode: BATCH_WAIT — hold each window until full (10 tx) or ~1000 blocks old'
+  : 'mode: settle each proof as soon as it is attested (set BATCH_WAIT=1 to batch)');
+if (process.env.SETTLE_NOW) console.warn('SETTLE_NOW is no longer read: settle-now is the default, BATCH_WAIT=1 restores batching');
 (async function loop() {
   for (;;) {
-    try { await autopay(); await collect(); await settleLoop(); await collectCustody(); await custodySettleLoop(); }
+    try { await autopay(); for (const l of LANES) { await collect(l); await settleLoop(l); } }
     catch (e: any) { console.error(e.shortMessage ?? e.message); }
     await new Promise(r => setTimeout(r, POLL_MS));
   }

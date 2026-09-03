@@ -17,7 +17,7 @@
 | `contracts/SellerPassport.sol` | Creditcoin | ERC-5192 soulbound record of custody facts (Proof-of-Custody's mirror of CreditPassport) — `waivesBond` gates whether a seller must post a custody stake |
 | `contracts/Attestcoin.sol` | — | precompile interfaces 0x…0FD2 (BlockProver) / 0x…0fD3 (ChainInfo) |
 | `contracts/Demo.sol` | — | `TestUSDC` (permit + EIP-3009), `DemoAsset` |
-| `test/` | — | 36 tests: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture, asset allowlist + pull-pattern, Proof-of-Custody (match/mismatch/timeout) |
+| `test/` | — | `forge test`: 5 security checks, state machine, batch, passport, permit/3009, real-proof fixture, asset allowlist + pull-pattern, Proof-of-Custody (match/mismatch/timeout) |
 | `worker/settle.ts` | — | convenience relayer: autopay pre-signed authorizations + listen → wait attested → batch proof → `settle` / `settleCustody`; serves the checkout UI |
 | `web/app/` | — | Vite + React + TypeScript source. Two entries, built to `web/dist/` (`npm run build:web`, gitignored, served by the worker): landing (`/`) and the checkout dashboard (`/dashboard/` — seller listing + custody bond, 1-click deposit, sign-once autopay, live tracker, passport, Proof-of-Custody chip attestation). No router — two static Vite build inputs, same shape as the two HTML files this replaced |
 | `docs/` | — | `DEMO.md` (stage script), `SUBMISSION.md` (technical submission), `AUDIT.md`; see also [`../docs/08-proof-of-custody.md`](../docs/08-proof-of-custody.md) for the full Proof-of-Custody spec |
@@ -53,6 +53,11 @@ id — matches `test/DemoAsset.t.sol`). Same deployer nonce ordering (Router/Cus
 Sepolia, then DemoAsset/Escrow on Creditcoin) as prior deploys; the escrow check
 `topics[1] == address(this)` still namespaces orders per deployment — orders from earlier deployments
 do not carry over to v4's contract state.
+
+**Source is ahead of v4 (2026-09-03)** — `withdrawBond` now also times out **Defaulted** orders to the
+seller (a buyer who never paid and never scanned used to strand the seller's bond forever, see
+`docs/AUDIT.md`); `Order.completedAt` is renamed `closedAt`; the two passports share `Soulbound.sol`.
+Redeploy with `sh script/deploy.sh` before the next live demo — until then the addresses above run v4.
 
 ## Demo (CLI)
 

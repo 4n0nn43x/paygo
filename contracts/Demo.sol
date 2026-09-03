@@ -5,6 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @dev Demo stand-in for USDC: ERC20 + EIP-2612 permit + EIP-3009 receiveWithAuthorization,
 ///      the same surface real USDC v2 exposes. Swapping to the real address is zero code change.
@@ -58,16 +59,11 @@ contract DemoAsset is ERC721("PayGo Demo Asset", "PGA") {
         _requireOwned(id);
         Meta storage m = meta[id];
         if (bytes(m.name).length == 0) {
-            return string.concat('data:application/json,{"name":"PayGo Demo Asset #', _u(id),
+            return string.concat('data:application/json,{"name":"PayGo Demo Asset #', Strings.toString(id),
                 '","description":"Demo escrowed asset (no image set)."}');
         }
         return string.concat('data:application/json,{"name":"', _esc(m.name), '","description":"', _esc(m.description),
             '","image":"', _esc(m.image), '"}');
-    }
-
-    function _u(uint256 v) private pure returns (string memory s) {
-        if (v == 0) return "0";
-        bytes memory b; while (v > 0) { b = abi.encodePacked(uint8(48 + v % 10), b); v /= 10; } return string(b);
     }
 
     /// @dev Minimal JSON-string escaping for attacker-controlled input (unlike CreditPassport's tokenURI,

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Demo in 3 acts, from the CLI. Requires .env filled by script/deploy.sh.
-#   sh script/demo.sh order            → seller mints an asset, escrows it, buyer = $BUYER (default: self), 4 installments
+#   sh script/demo.sh order            → seller mints an asset, escrows it, buyer = $BUYER (required, ≠ you: no self-dealing), 4 installments
 #   sh script/demo.sh pay <orderId> <n> → pay installment n on Sepolia (mints test USDC as needed)
 #   sh script/demo.sh default <orderId> → assert default (needs attested height > deadline + GRACE)
 #   sh script/demo.sh finalize <orderId>
@@ -19,13 +19,13 @@ set -eu
 . ./.env
 PK=$CREDITCOIN_WALLET_PRIVATE_KEY
 ME=$(cast wallet address --private-key "$PK")
-BUYER=${BUYER:-$ME}
 CC="--rpc-url $CREDITCOIN_RPC_URL --private-key $PK"
 SEP="--rpc-url $SOURCE_CHAIN_RPC_URL --private-key $PK"
 EPOCH=1000
 
 case "${1:-}" in
 order)
+  : "${BUYER:?set BUYER=0x… in .env — the buyer must be another address, createOrder rejects buyer == msg.sender}"
   ID=$(cast call $ASSET_ADDRESS "next()(uint256)" --rpc-url $CREDITCOIN_RPC_URL)
   cast send $ASSET_ADDRESS "mint(address)" $ME $CC >/dev/null 2>&1
   cast send $ASSET_ADDRESS "approve(address,uint256)" $ESCROW_ADDRESS $ID $CC >/dev/null 2>&1
@@ -35,7 +35,7 @@ order)
   PRICE=${PRICE:-100000000}; N=${N:-4}               # 100 tUSDC in 4 installments; deposit sized by the buyer's passport
   BOND=${BOND:-1000000000000000}                     # custody bond in wei CTC (default 0.001 CTC); 0 needs a clean SellerPassport
   cast send --value $BOND $ESCROW_ADDRESS "createOrder(address,address,uint256,address,address,uint256,uint8,uint64,uint64)" \
-    $BUYER $ASSET_ADDRESS $ID $ME $USDC_ADDRESS $PRICE $N $FIRST $EPOCH $CC >/dev/null 2>&1
+    $BUYER $ASSET_ADDRESS $ID $ME $USDC_ADDRESS $PRICE $N $FIRST $EPOCH $CC >/dev/null   # stderr kept: a revert must not pass silently
   OID=$(( $(cast call $ESCROW_ADDRESS "nextOrderId()(uint256)" --rpc-url $CREDITCOIN_RPC_URL) - 1 ))
   echo "order $OID: asset #$ID escrowed, buyer $BUYER, deadlines $FIRST +k×$EPOCH (Sepolia height)"
   cast call $ESCROW_ADDRESS "getOrder(uint256)((address,address,address,uint256,address,address,uint64,uint64,uint8,uint8,uint8,uint8,uint64,uint64,address,bool,bool,uint256[]))" $OID --rpc-url $CREDITCOIN_RPC_URL | grep -o '\[[0-9 \[\]e.,]*\]$' | sed 's/^/  installments: /';;

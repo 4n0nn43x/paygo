@@ -1,7 +1,7 @@
 # PayGo — pre-deployment security review
 
 An independent audit pass (the `sc-audit` skill) was run on the contracts before testnet deployment.
-Suite: `forge test` → 25 passing. Findings and their resolution below; each fix ships with a regression test.
+Findings and their resolution below; each fix ships with a regression test in `forge test`.
 
 ## HIGH-1 — Autopay theft via unbound payee — **FIXED**
 `payWithAuthorization` pulled the buyer's funds into the Router (signed) and forwarded `amount` to a
@@ -110,9 +110,15 @@ Nullifier domain separation between `settle` and `settleCustody` was independent
 cross-chain hunter and holds (no collision, fixed-width packed fields on both sides).
 
 **All three findings above are now fixed in the contracts** (Variant B of Finding 03 is an accepted,
-documented residual, not a code bug — see its entry). Suite: `forge test` → 47 passing, up from 25.
-Deployed testnet addresses are stale as of these changes; see the README note for the required v3
-redeploy before the next live demo.
+documented residual, not a code bug — see its entry) and live in the v4 deployment (README).
+
+## Bond stranded on Defaulted orders (2026-09-03) — **FIXED**
+`withdrawBond`'s timeout branch only fired for `Completed` orders. `bondRecipient` is otherwise set only by
+a chip match/mismatch, so a buyer who never paid and never scanned (→ `finalizeDefault` → `Defaulted`) left
+the seller's custody bond with no exit path at all.
+**Fix** (`PayGoEscrow.sol`): `finalizeDefault` stamps `closedAt` (renamed from `completedAt`), and the
+timeout branch accepts `Completed || Defaulted` — silence still favors the seller, same polarity as before.
+Regression: `test_withdrawBond_timeoutAfterDefaultFavorsSeller`. Needs a redeploy (README).
 
 ## Checked and OK (from the review)
 Nullifier scope (fixed-size `keccak(chainKey‖height‖txIndex)`, no cross-order replay); the 5 checks

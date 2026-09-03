@@ -73,12 +73,12 @@ is a flat, seller-chosen CTC stake — deliberately **not** a percentage of `pri
 need a CTC/payToken price oracle and reintroduce exactly the oracle dependency PayGo avoids elsewhere.
 A `SellerPassport` (ERC-5192, mirrors `CreditPassport`) waives the bond after 4 chip-matched deliveries
 with zero proven mismatches. Full spec: `../docs/08-proof-of-custody.md`. Implemented and tested
-(`test/CustodyRouter.t.sol`, `test_custody_*` in `test/PayGoEscrow.t.sol`); not yet independently
-security-reviewed (see `AUDIT.md`) and not yet redeployed to testnet.
+(`test/CustodyRouter.t.sol`, `test_custody_*` in `test/PayGoEscrow.t.sol`), independently reviewed
+(`AUDIT.md`: three findings, all fixed with regression tests) and deployed on testnet (addresses in the README).
 
 ## Setup
 ```sh
-npm i && forge test                       # 22 unit tests (precompiles mocked via vm.etch) + real-proof decode fixture
+npm i && forge test                       # unit tests (precompiles mocked via vm.etch) + real-proof decode fixture
 cp .env.example .env                      # key + RPCs
 sh script/deploy.sh                       # Sepolia: Router, TestUSDC · CC3: Escrow(+Passport), DemoAsset — note --libraries EvmV1Decoder
 npm run worker                            # relayer + autopay + checkout UI at http://localhost:8787
