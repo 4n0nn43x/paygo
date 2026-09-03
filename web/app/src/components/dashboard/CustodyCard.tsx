@@ -68,16 +68,16 @@ export function CustodyCard({ cfg, ccRead, log, orderId, reload }: {
 
   return (
     <div>
-      <div className="desc">A chip inside the physical item signs at listing and again at handoff. Same chip both times, the seller's bond comes back. A different chip is cryptographic proof of substitution, and the bond goes to the buyer. No jury.</div>
+      <div className="desc">A chip inside the item signs at listing, and again at handoff.</div>
       <div className="form-2">
         <fieldset>
           <legend><Cpu aria-hidden="true" />The chip</legend>
-          <label htmlFor="c-key">Chip private key <span className="mut">(stand-in for an NFC chip)</span></label>
+          <label htmlFor="c-key">Chip key <span className="mut">stands in for the NFC chip inside the item</span></label>
           <input id="c-key" placeholder="0x…" value={chipKey} onChange={e => setChipKey(e.target.value)} />
           <button className="sec" onClick={genChip}>Generate a chip</button>
         </fieldset>
         <fieldset>
-          <legend>Attest for order {id}</legend>
+          <legend>Scan for order {id}</legend>
           <div className="btn-col">
             <button onClick={() => attestCustody(0)}><PackageOpen aria-hidden="true" />Origin <span className="hint">seller, at listing</span></button>
             <button onClick={() => attestCustody(1)}><Truck aria-hidden="true" />Delivery <span className="hint">buyer, at handoff</span></button>
@@ -90,6 +90,9 @@ export function CustodyCard({ cfg, ccRead, log, orderId, reload }: {
         <button className="sec" onClick={() => esc('claimBond', 'bond claimed')}>Claim my bond</button>
       </div>
       <div className="out mono">{out}</div>
+      <p className="note">Same chip both times means nothing was swapped, and the bond returns to the seller.
+        A different chip proves nothing, since a chip is just a keypair, so the bond is burned rather than
+        paid to anyone.</p>
     </div>
   );
 }

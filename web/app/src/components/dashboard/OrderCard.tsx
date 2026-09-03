@@ -37,7 +37,7 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
     : null;
 
   const next = o?.nextDeadline != null && o.nextNo != null ? o.nextDeadline : null;
-  const name = o ? (o.meta?.name || `Demo asset #${o.tokenId}`) : '';
+  const name = o ? (o.meta?.name || `Item #${o.tokenId}`) : '';
 
   return (
     <section className="card order">
@@ -52,8 +52,8 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
 
       {!o ? (
         <div className="empty-t">
-          {state.kind === 'missing' ? `No order #${orderId} yet. Type another id, or list an asset with the Sell panel: the order it creates opens here.`
-            : state.kind === 'loading' ? 'Reading the order from Creditcoin…' : 'Type an order id, or list an asset with the Sell panel.'}
+          {state.kind === 'missing' ? `Nothing at #${orderId} yet. Try another number, or put something up for sale: the order opens here.`
+            : state.kind === 'loading' ? 'Reading it from Creditcoin…' : 'Pick an order number, or put something up for sale with the Sell panel.'}
         </div>
       ) : (
         <div className="order-body">
@@ -62,7 +62,7 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
               {o.meta?.image ? <img src={o.meta.image} alt={name} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : <ImageOff strokeWidth={1.25} aria-hidden="true" />}
             </div>
             <div className="order-meta">
-              <div className="asset-coll">Demo asset · #{String(o.tokenId)}</div>
+              <div className="asset-coll">Escrowed item · #{String(o.tokenId)}</div>
               <h2>{name}</h2>
               {o.meta?.description && <p className="desc">{o.meta.description}</p>}
               <div className="parties">
@@ -71,8 +71,8 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
                 <div><span className="k">Asset</span><span className="mut"><Lock aria-hidden="true" />{o.status === 3 ? 'released to buyer' : o.status === 2 ? 'back to seller' : 'escrowed'}</span></div>
                 <div><span className="k">Authenticity</span>
                   {o.custodyVerified ? <span className="ok"><ShieldCheck aria-hidden="true" />chip matched</span>
-                    : o.custodyDisputed ? <span className="bad"><ShieldAlert aria-hidden="true" />substitution proven</span>
-                    : o.chipId !== ZERO ? <span className="mut">chip bound</span> : <span className="mut">no chip yet</span>}
+                    : o.custodyDisputed ? <span className="bad"><ShieldAlert aria-hidden="true" />chip did not match</span>
+                    : o.chipId !== ZERO ? <span className="mut">chip registered</span> : <span className="mut">no chip yet</span>}
                 </div>
               </div>
             </div>
@@ -86,17 +86,17 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
             <div className="kpi">
               <div className="k">Next installment</div>
               <div className="v">{o.nextNo != null ? fmt(o.amounts[o.nextNo]) : 'none'}</div>
-              <div className="s">{next != null ? `due by Ethereum block ${next}` : 'schedule complete'}</div>
+              <div className="s">{next != null ? `deadline: Ethereum block ${next}` : 'schedule complete'}</div>
             </div>
             <div className="kpi">
               <div className="k">Time left</div>
               <div className="v">{next != null ? (o.overdue ? <span className="bad">overdue</span> : o.att > next ? <span className="warn">in grace</span> : <span className="ok">in time</span>) : '–'}</div>
-              <div className="s">{next != null ? `grace ends at block ${next + o.grace}` : 'nothing due'}</div>
+              <div className="s">{next != null ? `grace runs out at Ethereum block ${next + o.grace}` : 'nothing due'}</div>
             </div>
             <div className="kpi">
-              <div className="k">{o.status === 1 ? 'Cure window' : 'Attested clock'}</div>
+              <div className="k">{o.status === 1 ? 'Time to prove it' : 'Proven up to'}</div>
               <div className="v">{o.status === 1 && o.cureEndsAt != null ? `${o.cureEndsAt - BigInt(o.ccBlock)} blocks` : String(o.att)}</div>
-              <div className="s">{o.status === 1 ? 'a proof of an on-time payment still cures it' : 'latest Ethereum height proven on Creditcoin'}</div>
+              <div className="s">{o.status === 1 ? 'a proof of an on-time payment still saves it' : 'the latest Ethereum block Creditcoin has verified'}</div>
             </div>
           </div>
           <div className="order-sched">

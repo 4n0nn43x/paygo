@@ -12,7 +12,7 @@ import { PassportCard } from '../components/dashboard/PassportCard';
 import { ActivityFeed, type LogEntry } from '../components/dashboard/ActivityFeed';
 import '../styles/dashboard.css';
 
-const PANEL_TITLE: Record<PanelKey, string> = { seller: 'Sell: list an asset', buyer: 'Buy: checkout', custody: 'Proof-of-Custody' };
+const PANEL_TITLE: Record<PanelKey, string> = { seller: 'Sell on terms', buyer: 'Buy in installments', custody: 'Proof-of-Custody' };
 
 // Deep link: #order=2&panel=buyer, so a demo order can be shared and reopened where it was.
 function readHash() {
@@ -44,7 +44,7 @@ export function Dashboard() {
     log('connected ' + addr);
   }
 
-  if (!cfg || !ccRead || !sepRead) return <div className="boot">Connecting to the relayer…</div>;
+  if (!cfg || !ccRead || !sepRead) return <div className="boot">Connecting…</div>;
   return <Ready cfg={cfg} ccRead={ccRead} sepRead={sepRead} me={me} connect={connect} orderId={orderId} setOrderId={setOrderId}
     panel={panel} setPanel={setPanel} log={log} localLog={localLog} workerState={workerState} />;
 }

@@ -22,7 +22,7 @@ export function ActivityFeed({ state, localLog }: { state: WorkerState | null; l
   return (
     <section className="card feed">
       <h2>Activity</h2>
-      <div className="desc">Your actions, the relayer's autopay, and every proof as it lands. Nothing here needs you.</div>
+      <div className="desc">Everything that moved: what you did, the installments paying themselves, and every proof as it lands. None of it needs you.</div>
       {rows.length ? (
         <ul className="feed-list">
           {rows.map(r => (
@@ -30,7 +30,7 @@ export function ActivityFeed({ state, localLog }: { state: WorkerState | null; l
           ))}
         </ul>
       ) : (
-        <div className="empty-t">Quiet for now. Pay a deposit or arm autopay and the proofs will show up here.</div>
+        <div className="empty-t">Quiet for now. Pay a deposit or switch on autopay, and the proofs show up here.</div>
       )}
     </section>
   );

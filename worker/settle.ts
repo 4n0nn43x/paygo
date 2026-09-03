@@ -238,7 +238,7 @@ createServer((req, res) => {
     // Vite build (web/app -> web/dist): landing at /, dashboard at /dashboard/, hashed assets in
     // between. No inline script/style anymore (ethers is bundled, not CDN-loaded), so CSP drops
     // 'unsafe-inline' entirely — a tightening, not a relaxation, of the pre-migration policy.
-    const csp = "default-src 'none'; script-src 'self'; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src 'self' data: https://api.qrserver.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com";
+    const csp = "default-src 'none'; script-src 'self'; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src 'self' data: https:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com";
     const file = staticFilePath(req.url ?? '/');
     if (file) {
       res.writeHead(200, { 'content-type': mimeType(file), 'x-content-type-options': 'nosniff', 'content-security-policy': csp });
