@@ -3,9 +3,9 @@ import { fmt } from '../../lib/format';
 
 export interface ScheduleStep { no: number; amount: bigint; deadline: bigint; paid: boolean }
 
-// Status track for the installment schedule. Only two states occur here (paid/due — BuyerCard
-// never computes "overdue", that lives in TrackerCard), so color (good/neutral) is paired with an
-// icon + on-hover label, never color alone — dataviz skill: CVD floor band requires secondary encoding.
+// Status track for the installment schedule. Only two states occur here (paid/due; "overdue" is the
+// OrderCard's business), so color (good/neutral) is paired with an icon + on-hover label, never color
+// alone - dataviz skill: CVD floor band requires secondary encoding.
 export function ScheduleTimeline({ steps }: { steps: ScheduleStep[] }) {
   const [hover, setHover] = useState<number | null>(null);
   if (!steps.length) return null;

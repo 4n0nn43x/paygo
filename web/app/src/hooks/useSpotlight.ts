@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-/** Cursor-spotlight on .hoverable cards — ported from landing.html's inline script. */
+/** Cursor-spotlight on .hoverable cards: writes --mx/--my for the CSS overlay. */
 export function useSpotlight<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   useEffect(() => {

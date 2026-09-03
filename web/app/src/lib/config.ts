@@ -21,21 +21,30 @@ export interface WorkerState {
   custodyDone: number;
 }
 
-/** Fetches /state once (same as the original init()), exposes read-only providers built from it. */
+/** Polls /state every 15 s: the first response fixes the config and the read-only providers, every
+ *  response refreshes the worker state. If the worker goes offline the page keeps reading the chain. */
 export function useConfig() {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [ccRead, setCcRead] = useState<JsonRpcProvider | null>(null);
   const [sepRead, setSepRead] = useState<JsonRpcProvider | null>(null);
+  const [workerState, setWorkerState] = useState<WorkerState | null>(null);
 
   useEffect(() => {
-    fetch('/state')
-      .then(r => r.json())
-      .then((c: Cfg) => {
-        setCfg(c);
-        setCcRead(new JsonRpcProvider(c.ccRpc));
-        setSepRead(new JsonRpcProvider(c.sepoliaRpc));
-      });
+    let cancelled = false;
+    async function refresh() {
+      try {
+        const s: Cfg & WorkerState = await (await fetch('/state')).json();
+        if (cancelled) return;
+        setWorkerState(s);
+        setCfg(c => c ?? s);
+        setCcRead(p => p ?? new JsonRpcProvider(s.ccRpc));
+        setSepRead(p => p ?? new JsonRpcProvider(s.sepoliaRpc));
+      } catch { /* worker offline: the page still reads the chain directly */ }
+    }
+    refresh();
+    const t = setInterval(refresh, 15000);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
-  return { cfg, ccRead, sepRead };
+  return { cfg, ccRead, sepRead, workerState };
 }

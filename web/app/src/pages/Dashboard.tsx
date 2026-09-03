@@ -1,81 +1,87 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getAddress } from 'ethers';
-import { useConfig, type WorkerState } from '../lib/config';
+import { useConfig } from '../lib/config';
+import { useOrder } from '../hooks/useOrder';
+import { Dock, type PanelKey } from '../components/dashboard/Dock';
 import { BrandMark } from '../components/dashboard/BrandMark';
+import { OrderCard } from '../components/dashboard/OrderCard';
 import { SellerCard } from '../components/dashboard/SellerCard';
 import { BuyerCard } from '../components/dashboard/BuyerCard';
-import { TrackerCard } from '../components/dashboard/TrackerCard';
-import { PassportCard } from '../components/dashboard/PassportCard';
 import { CustodyCard } from '../components/dashboard/CustodyCard';
-import { WorkerLog, type LogEntry } from '../components/dashboard/WorkerLog';
-import { Sidebar, type PanelKey } from '../components/dashboard/Sidebar';
-import { GasChart } from '../components/dashboard/GasChart';
+import { PassportCard } from '../components/dashboard/PassportCard';
+import { ActivityFeed, type LogEntry } from '../components/dashboard/ActivityFeed';
 import '../styles/dashboard.css';
 
-export function Dashboard() {
-  const { cfg, ccRead, sepRead } = useConfig();
-  const [me, setMe] = useState<string | null>(null);
-  const [orderId, setOrderId] = useState('1');
-  const [localLog, setLocalLog] = useState<LogEntry[]>([]);
-  const [workerState, setWorkerState] = useState<WorkerState | null>(null);
-  const [panel, setPanel] = useState<PanelKey>('seller');
+const PANEL_TITLE: Record<PanelKey, string> = { seller: 'Sell: list an asset', buyer: 'Buy: checkout', custody: 'Proof-of-Custody' };
 
-  const log = useCallback((m: string, cls = '') => {
-    setLocalLog(prev => [{ msg: new Date().toLocaleTimeString() + '  ' + m, cls }, ...prev]);
+// Deep link: #order=2&panel=buyer, so a demo order can be shared and reopened where it was.
+function readHash() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  const panel = q.get('panel') as PanelKey | null;
+  return { order: q.get('order') || '1', panel: panel && panel in PANEL_TITLE ? panel : 'seller' as PanelKey };
+}
+
+export function Dashboard() {
+  const { cfg, ccRead, sepRead, workerState } = useConfig();
+  const [me, setMe] = useState<string | null>(null);
+  const [{ order: orderId, panel }, setNav] = useState(readHash);
+  const [localLog, setLocalLog] = useState<LogEntry[]>([]);
+  const setOrderId = (order: string) => setNav(n => ({ ...n, order }));
+  const setPanel = (panel: PanelKey) => setNav(n => ({ ...n, panel }));
+
+  useEffect(() => { history.replaceState(null, '', `#order=${encodeURIComponent(orderId)}&panel=${panel}`); }, [orderId, panel]);
+
+  const log = useCallback((msg: string, cls = '') => {
+    setLocalLog(prev => [{ t: new Date().toLocaleTimeString(), msg, cls }, ...prev]);
   }, []);
 
   async function connect() {
     const eth = (window as any).ethereum;
-    if (!eth) return alert('Install MetaMask');
+    if (!eth) { log('no wallet found: install MetaMask', 'bad'); return; }
     const [a] = await eth.request({ method: 'eth_requestAccounts' });
     const addr = getAddress(a);
     setMe(addr);
     log('connected ' + addr);
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    async function refresh() {
-      try {
-        const s = await (await fetch('/state')).json();
-        if (!cancelled) setWorkerState(s);
-      } catch { /* ignore — matches original's silent catch */ }
-    }
-    refresh();
-    const t = setInterval(refresh, 15000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, []);
+  if (!cfg || !ccRead || !sepRead) return <div className="boot">Connecting to the relayer…</div>;
+  return <Ready cfg={cfg} ccRead={ccRead} sepRead={sepRead} me={me} connect={connect} orderId={orderId} setOrderId={setOrderId}
+    panel={panel} setPanel={setPanel} log={log} localLog={localLog} workerState={workerState} />;
+}
 
+function Ready({ cfg, ccRead, sepRead, me, connect, orderId, setOrderId, panel, setPanel, log, localLog, workerState }: any) {
+  const { state, reload } = useOrder(cfg, ccRead, orderId);
+  const order = state.kind === 'ok' ? state.order : null;
   return (
     <>
-      <div className="aura"><i className="a1"></i><i className="a2"></i></div>
       <header>
         <div className="nav">
           <a className="brand" href="/"><BrandMark className="mark" />PayGo</a>
-          <span className="tagline">Buy now, pay in installments — escrow on Creditcoin, paid on Ethereum, proven by Attestcoin.</span>
-          <button id="connect" onClick={connect}>Connect wallet</button>
-          <span id="who" className="mono">{me}</span>
+          <span className="tagline">Escrow on Creditcoin, paid on Ethereum, proven by Attestcoin.</span>
+          {me ? <span id="who" className="mono" title={me}><i className="dot" />{me.slice(0, 6)}…{me.slice(-4)}</span>
+            : <button id="connect" onClick={connect}>Connect wallet</button>}
         </div>
       </header>
-      {cfg && ccRead && sepRead ? (
-        <main>
-          <div className="dash-grid">
-            <Sidebar active={panel} onSelect={setPanel} />
-            <div className="panel-col">
-              {panel === 'seller' && <SellerCard cfg={cfg} sepRead={sepRead} me={me} log={log}
-                onOrderCreated={id => { setOrderId(id); setPanel('buyer'); }} />}
-              {panel === 'buyer' && <BuyerCard cfg={cfg} ccRead={ccRead} me={me} log={log} orderId={orderId} setOrderId={setOrderId} />}
-              {panel === 'passport' && <PassportCard cfg={cfg} ccRead={ccRead} me={me} />}
-              {panel === 'custody' && <CustodyCard cfg={cfg} ccRead={ccRead} log={log} />}
+      <main className="app">
+        <Dock active={panel} onSelect={setPanel} />
+        <div className="content">
+          <OrderCard cfg={cfg} state={state} orderId={orderId} setOrderId={setOrderId} reload={reload} log={log} />
+          <div className="grid">
+            <div className="col">
+              <section className="card">
+                <h2>{PANEL_TITLE[panel as PanelKey]}</h2>
+                {panel === 'seller' && <SellerCard cfg={cfg} sepRead={sepRead} me={me} log={log} onOrderCreated={(id: string) => { setOrderId(id); setPanel('buyer'); }} />}
+                {panel === 'buyer' && <BuyerCard cfg={cfg} me={me} log={log} order={order} reload={reload} />}
+                {panel === 'custody' && <CustodyCard cfg={cfg} ccRead={ccRead} log={log} orderId={orderId} reload={reload} />}
+              </section>
             </div>
-            <div className="pinned-col">
-              <TrackerCard cfg={cfg} ccRead={ccRead} log={log} orderId={orderId} setOrderId={setOrderId} />
-              <GasChart />
-              <WorkerLog state={workerState} localLog={localLog} />
+            <div className="col">
+              <PassportCard cfg={cfg} ccRead={ccRead} me={me} />
+              <ActivityFeed state={workerState} localLog={localLog} />
             </div>
           </div>
-        </main>
-      ) : null}
+        </div>
+      </main>
     </>
   );
 }

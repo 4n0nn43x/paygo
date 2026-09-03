@@ -45,9 +45,9 @@ header{position:absolute;top:0;left:0;right:0;z-index:30;padding:18px 0}
 .nav-links a:hover{color:var(--ink)}.nav-links a:hover::after{right:0}
 @media(max-width:880px){.nav-links{display:none}}
 
-/* HERO — wider, taller, immersive */
-.hero{padding:14px 0 0;min-height:100vh;display:flex;flex-direction:column}
-.hero .wrap{flex:1;display:flex;padding:96px 0 14px}
+/* HERO - wider, taller, immersive */
+.hero{padding:14px 0 0}
+.hero .wrap{display:flex;padding:96px 0 14px}
 .hero-card{position:relative;width:100%;border-radius:28px;overflow:hidden;
   background:linear-gradient(160deg,#FBF7EF 0%,#F3EFE7 60%,#EFEDE8 100%);
   border:1px solid var(--line);box-shadow:0 40px 100px rgba(0,0,0,.09)}
@@ -59,7 +59,7 @@ header{position:absolute;top:0;left:0;right:0;z-index:30;padding:18px 0}
 .hero-card .mesh{position:absolute;inset:0;z-index:1;opacity:.4;pointer-events:none;
   background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
   background-size:56px 56px;mask-image:radial-gradient(90% 80% at 15% 92%,#000,transparent 70%)}
-.hero-in{position:relative;z-index:3;flex:1;display:grid;grid-template-columns:1.12fr .88fr;gap:clamp(28px,4vw,64px);align-items:center;padding:clamp(36px,5vw,72px)}
+.hero-in{position:relative;z-index:3;flex:1;display:grid;grid-template-columns:1.12fr .88fr;gap:clamp(28px,4vw,64px);align-items:center;padding:clamp(36px,5vw,72px) clamp(36px,5vw,72px) 132px}
 .hero h1{font-size:clamp(42px,6.4vw,86px);max-width:15ch;letter-spacing:-.045em}
 .hero h1 .em{background:linear-gradient(100deg in oklch,#E9A21A,#F6C650 55%,#E9A21A);-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero-sub{color:var(--ink-70);font-size:clamp(15px,1.35vw,19px);max-width:48ch;margin:26px 0 34px;line-height:1.5}
@@ -68,39 +68,31 @@ header{position:absolute;top:0;left:0;right:0;z-index:30;padding:18px 0}
 .hero-brands .lab{font-size:11.5px;color:var(--ink-40);margin-bottom:9px;font-family:var(--mono);letter-spacing:.09em}
 .mq-track{display:flex;width:max-content;gap:34px;animation:mq 24s linear infinite;will-change:transform}
 .mq-track span{white-space:nowrap;color:var(--ink-55);font-size:13px}
-@media(max-width:980px){.hero{min-height:auto}.hero-in{grid-template-columns:1fr;padding:36px 26px 210px}.hero .wrap{padding-top:96px}.hero-brands{max-width:calc(100% - 52px)}}
+@media(max-width:980px){.hero-in{grid-template-columns:1fr;padding:36px 26px 210px}.hero .wrap{padding-top:96px}.hero-brands{max-width:calc(100% - 52px)}}
 
-/* hero product illustration: payment on Ethereum → proof → escrow on Creditcoin */
-.flow{position:relative;z-index:3;display:flex;flex-direction:column;width:100%;max-width:410px;margin-left:auto}
-.node{position:relative;border-radius:18px;padding:18px 20px;background:rgba(255,255,255,.6);
-  backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);
-  border:1px solid rgba(255,255,255,.85);box-shadow:0 22px 50px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.9)}
-.node-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
-.node .chain{font-family:var(--mono);font-size:11px;letter-spacing:.11em;color:var(--ink-55)}
-.node .badge{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--ink-55)}
-.node .ccbadge{color:#966200;border-color:rgba(233,162,26,.45);background:rgba(233,162,26,.1)}
-.diamond{width:24px;height:24px;transform:rotate(45deg);border-radius:6px;background:linear-gradient(135deg,#93A6CC,#495B86);box-shadow:inset 0 1px 2px rgba(255,255,255,.45),0 2px 6px rgba(60,80,130,.3)}
-.row2{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-size:13.5px;color:var(--ink-70)}
-.row2 b{color:var(--ink);font-weight:600}
-.row2.sub{font-size:11px;color:var(--ink-40);margin-top:9px;line-height:1.4}
-.row2 .ic{width:30px;height:30px;flex:none;border-radius:9px;display:grid;place-items:center;background:rgba(11,11,15,.05);border:1px solid var(--line);color:var(--ink-70)}
-.node.cc .row2 .ic{background:rgba(233,162,26,.14);border-color:rgba(233,162,26,.32);color:#966200}
-.beam{position:relative;height:98px;width:100%}
-.beam .rail{position:absolute;left:50%;top:6px;bottom:6px;width:2px;margin-left:-1px;border-radius:2px;overflow:hidden;
-  background:linear-gradient(180deg,rgba(233,162,26,.12),rgba(233,162,26,.55),rgba(233,162,26,.12))}
-.beam .rail::before{content:"";position:absolute;left:-1px;right:-1px;top:-10px;bottom:-10px;
-  background:repeating-linear-gradient(180deg,transparent 0 6px,rgba(255,255,255,.75) 6px 10px);animation:flow 1.3s linear infinite;will-change:transform}
-.beam .coin{position:absolute;left:50%;width:20px;height:20px;margin-left:-10px;border-radius:50%;z-index:2;
-  background:radial-gradient(60% 55% at 38% 32%,#FFF3CE,#F6C650 44%,#E9A21A 74%,#B27412 100%);
-  box-shadow:0 0 14px rgba(233,162,26,.85),inset 0 1px 2px rgba(255,255,255,.6);animation:travel 3s ease-in-out infinite;will-change:top,opacity}
-.beam .lab{position:absolute;left:calc(50% + 22px);top:50%;transform:translateY(-50%);white-space:nowrap;
-  font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;color:#966200;display:flex;align-items:center;gap:6px}
-.mini{display:flex;gap:8px;margin-top:14px}
-.mini i{flex:1;height:7px;border-radius:999px;background:rgba(11,11,15,.1);transition:background .45s var(--ease),box-shadow .45s}
-.mini i.on{background:var(--gold);box-shadow:0 0 9px rgba(233,162,26,.8)}
-@keyframes flow{to{transform:translateY(10px)}}
-@keyframes travel{0%{top:-4px;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:82px;opacity:0}}
-@media(max-width:980px){.flow{max-width:440px;margin:0 auto}}
+/* hero illustration: abstract schedule clock (rings, graduations, installment slots that draw in gold) */
+.dial-wrap{position:relative;z-index:3;width:100%;max-width:500px;margin-left:auto;
+  opacity:0;transform:scale(.96);filter:blur(8px);animation:dial-in 1s var(--ease) .1s forwards}
+.dial{display:block;width:100%;aspect-ratio:1;overflow:visible}
+.dial line,.dial circle{fill:none;stroke:var(--ink);stroke-linecap:round;vector-effect:non-scaling-stroke}
+.dial-grid line{stroke-width:1;stroke-opacity:.06}
+.dial-ticks line{stroke-width:1;stroke-opacity:.16}.dial-ticks line.major{stroke-opacity:.34;stroke-width:1.25}
+.dial-ring{stroke-width:1;stroke-opacity:.14}
+.dial-dash{stroke-dasharray:2 11;stroke-opacity:.3;animation:spin 140s linear infinite}
+.dial-marker{animation:spin 56s linear infinite reverse}
+.dial .dial-marker circle{fill:var(--ink);fill-opacity:.55;stroke:none}
+.dial-marker,.dial-dash{transform-origin:260px 260px;transform-box:view-box}
+/* one slot = 1 unit of pathLength; .88 drawn + .12 gap; the huge second dash value stops the pattern repeating */
+.dial .dial-seg{stroke-width:2.5;stroke-opacity:.12;stroke-dasharray:.88 100;stroke-dashoffset:.06}
+.dial .dial-seg.on{stroke:var(--gold);stroke-opacity:1;stroke-dashoffset:.94;animation:dial-draw .9s cubic-bezier(.23,1,.32,1) forwards}
+.dial .dial-core{fill:var(--gold);stroke:none}
+.dial-legend{display:flex;justify-content:space-between;gap:16px;margin-top:14px;padding:0 6px;
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-40)}
+.dial-legend b{font-weight:600;color:var(--ink)}
+@keyframes dial-in{to{opacity:1;transform:none;filter:blur(0)}}
+@keyframes dial-draw{to{stroke-dashoffset:.06}}
+@media(max-width:980px){.dial-wrap{max-width:min(360px,80vw);margin:0 auto}}
+@media(prefers-reduced-motion:reduce){.dial-wrap{opacity:1;transform:none;filter:none;animation:none}.dial .dial-seg.on{stroke-dashoffset:.06;animation:none}.dial-dash,.dial-marker{animation:none}}
 
 /* sections */
 section{padding:clamp(70px,9vw,116px) 0}
@@ -111,7 +103,7 @@ section{padding:clamp(70px,9vw,116px) 0}
 .lead{font-size:clamp(20px,2.7vw,30px);line-height:1.35;color:var(--ink);font-family:var(--head);font-weight:500;letter-spacing:-.025em}
 .lead .muted{color:var(--ink-40)}
 
-/* interactive cards — cursor spotlight + lift (premium hover) */
+/* interactive cards - cursor spotlight + lift (premium hover) */
 .hoverable{position:relative;transition:transform .35s var(--ease),box-shadow .35s var(--ease),border-color .35s}
 .hoverable::after{content:"";position:absolute;inset:0;border-radius:inherit;opacity:0;transition:opacity .35s;pointer-events:none;
   background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),rgba(246,198,80,.22),transparent 60%)}
@@ -158,7 +150,7 @@ section{padding:clamp(70px,9vw,116px) 0}
 
 /* use cases */
 .uc{display:grid;grid-template-columns:.92fr 1.08fr;gap:28px;align-items:stretch}
-.uc-list{display:flex;flex-direction:column;gap:14px}
+.uc-list{display:flex;flex-direction:column;justify-content:center;gap:14px}
 .uc-item{position:relative;overflow:hidden;border-radius:18px;padding:24px 26px 24px 30px;background:#fff;border:1px solid var(--line)}
 .uc-item::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg in oklch,var(--gold-soft),var(--gold));transform:scaleY(0);transform-origin:top;transition:transform .4s var(--ease)}
 .uc-item:hover{box-shadow:0 18px 44px rgba(0,0,0,.08);border-color:rgba(233,162,26,.35)}

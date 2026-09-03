@@ -1,6 +1,5 @@
 import { BrowserProvider, type Signer } from 'ethers';
 
-// Ported verbatim from web/index.html.
 export const CC = {
   chainId: '0x18e8f',
   chainName: 'Creditcoin CC3 Testnet',

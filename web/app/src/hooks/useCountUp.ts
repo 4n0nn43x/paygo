@@ -7,7 +7,7 @@ function fmt(n: number, sep: boolean) {
   return sep ? n.toLocaleString('en-US') : String(n);
 }
 
-/** Count-up-on-scroll for a stat number — ported from landing.html's inline script. */
+/** Count-up-on-scroll for a stat number. */
 export function useCountUp(to: number, sep = false) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {

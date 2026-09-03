@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-/** IntersectionObserver reveal/stagger — ported from landing.html's inline script. */
+/** Adds the `in` class once the element scrolls into view (drives `.reveal` / `.stagger` in landing.css). */
 export function useReveal<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   useEffect(() => {

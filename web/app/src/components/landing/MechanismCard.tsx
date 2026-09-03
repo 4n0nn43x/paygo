@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useSpotlight } from '../../hooks/useSpotlight';
 
-// `hoverable` MUST be a class on the same element as `card`/`light`/`dark` — the CSS
+// `hoverable` MUST be a class on the same element as `card`/`light`/`dark` - the CSS
 // spotlight overlay (`.hoverable::after{border-radius:inherit}`) inherits from that element.
 export function MechanismCard({ variant, icon, title, desc, tag }: {
   variant: 'light' | 'dark'; icon: ReactNode; title: string; desc: string; tag: string;

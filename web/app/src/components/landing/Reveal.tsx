@@ -1,12 +1,8 @@
 import type { ReactNode } from 'react';
 import { useReveal } from '../../hooks/useReveal';
 
-export function Reveal({ as: As = 'div', className = '', children }: { as?: any; className?: string; children: ReactNode }) {
+/** Adds `in` once scrolled into view. Callers pass the CSS mode in className: `reveal …` or `stagger …`. */
+export function Reveal({ as: As = 'div', className, children }: { as?: any; className: string; children: ReactNode }) {
   const ref = useReveal<HTMLDivElement>();
-  return <As ref={ref} className={`reveal ${className}`}>{children}</As>;
-}
-
-export function Stagger({ as: As = 'div', className = '', children }: { as?: any; className?: string; children: ReactNode }) {
-  const ref = useReveal<HTMLDivElement>();
-  return <As ref={ref} className={`stagger ${className}`}>{children}</As>;
+  return <As ref={ref} className={className}>{children}</As>;
 }

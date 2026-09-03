@@ -1,8 +1,8 @@
-// Ported verbatim from web/index.html's inline <script> — same ABIs, same contract surface.
+// Human-readable ABIs: only the functions the dashboard calls.
 export const ESCROW_ABI = [
   'function createOrder(address buyer,address asset,uint256 tokenId,address payee,address payToken,uint256 price,uint8 n,uint64 firstDeadline,uint64 interval) payable returns (uint256)',
   'function nextOrderId() view returns (uint256)',
-  'function getOrder(uint256) view returns (tuple(address seller,address buyer,address asset,uint256 tokenId,address payee,address payToken,uint64 firstDeadline,uint64 interval,uint8 n,uint8 paidCount,uint8 disputedNo,uint8 status,uint64 assertedAt,uint64 completedAt,address chipId,bool custodyVerified,bool custodyDisputed,uint256[] amounts))',
+  'function getOrder(uint256) view returns (tuple(address seller,address buyer,address asset,uint256 tokenId,address payee,address payToken,uint64 firstDeadline,uint64 interval,uint8 n,uint8 paidCount,uint8 disputedNo,uint8 status,uint64 assertedAt,uint64 closedAt,address chipId,bool custodyVerified,bool custodyDisputed,uint256[] amounts))',
   'function paid(uint256,uint8) view returns (bool)',
   'function passport() view returns (address)',
   'function sellerPassport() view returns (address)',
@@ -15,6 +15,8 @@ export const ESCROW_ABI = [
   'function withdrawBond(uint256)',
   'function claimableBond(address) view returns (uint256)',
   'function claimBond()',
+  'function claimAsset(uint256)',
+  'function withdrawAsset(uint256)',
 ] as const;
 
 export const CUSTODY_ROUTER_ABI = [
