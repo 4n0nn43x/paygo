@@ -2,7 +2,8 @@
   "name": "paygo",
   "private": true,
   "version": "0.1.0",
-  "description": "PayGo — trustless cross-chain hire-purchase on Creditcoin (BUIDL CTC 2026 Fall)",
+  "description": "Hire-purchase protocol: asset escrowed on Creditcoin, installments paid in ERC-20 on Ethereum, settled by Attestcoin inclusion proofs.",
+  "license": "MIT",
   "scripts": {
     "build": "forge build",
     "build:web": "cd web/app && npm install && npm run build",
