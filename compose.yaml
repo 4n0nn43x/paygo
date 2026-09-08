@@ -1,0 +1,46 @@
+# PayGo — Caddy (TLS auto) devant le worker. Le worker n'est JAMAIS publié sur
+# l'hôte : il n'est joignable que par Caddy, sur le réseau interne.
+name: paygo
+
+services:
+  worker:
+    build: .
+    image: paygo-worker:local
+    restart: unless-stopped
+    env_file: [.env]                 # jamais dans l'image : monté au runtime
+    environment:
+      WORKER_STATE: /data/state.json
+      PORT: "8787"
+    volumes:
+      - worker-state:/data
+    networks: [paygo]
+    read_only: true                  # seul /data (volume) et /tmp sont inscriptibles
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 1g
+    pids_limit: 256
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  caddy:
+    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data             # certificats Let's Encrypt — à conserver
+      - caddy-config:/config
+    networks: [paygo]
+    depends_on: [worker]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+networks:
+  paygo:
+    name: paygo_net                  # réseau dédié : rien d'autre sur l'hôte n'y touche
+
+volumes:
+  worker-state:
+  caddy-data:
+  caddy-config:

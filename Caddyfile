@@ -1,0 +1,14 @@
+paygo.fyra.fun {
+	encode zstd gzip
+	reverse_proxy worker:8787
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "no-referrer"
+		X-Content-Type-Options    "nosniff"
+		Permissions-Policy        "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+	# Le CSP est posé par le worker lui-même (il y injecte les URLs RPC) : on ne le double pas ici.
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=PayGo — verifie GitHub toutes les 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+# Evite que plusieurs serveurs tapent l'API GitHub a la meme seconde.
+RandomizedDelaySec=30s
+Unit=paygo-cd.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=PayGo — deploiement par tirage (pull) depuis GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/apps/paygo
+ExecStart=%h/apps/paygo/script/cd.sh
+# Le script sort en 0 quand il n'y a rien a faire : seuls les vrais echecs remontent.
+StandardOutput=journal
+StandardError=journal

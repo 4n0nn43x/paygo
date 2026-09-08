@@ -1,0 +1,14 @@
+.git
+.env
+node_modules
+web/app/node_modules
+web/dist
+out
+cache
+broadcast
+audit
+docs
+test
+script
+worker/state.json
+*.log

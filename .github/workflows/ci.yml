@@ -1,0 +1,108 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Jeton en lecture seule par défaut. Aucun job ne l'élargit : rien ici n'écrit dans le dépôt.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Les scanners tournent en conteneurs pinnés PAR DIGEST : un tag est mutable, c'est
+# exactement le vecteur de la compromission tj-actions/changed-files.
+env:
+  GITLEAKS: zricethezav/gitleaks@sha256:2bcceac45179b3a91bff11a824d0fb952585b429e54fc928728b1d4d5c3e5176
+  TRIVY:    aquasec/trivy@sha256:91c3a842834563a6860dbaec5af7c1949df5caf988f9632ef5cbb0a5cd59d8f8
+  SEMGREP:  semgrep/semgrep@sha256:ae27024c16f7848cdbfd49c24ed0b78b13f13b85fcd7b87c679aaa8b0c0dce98
+  ZIZMOR:   ghcr.io/zizmorcore/zizmor@sha256:ecb5e81e47bdb9e61ffa26b3def736ef4a6842d25e106986fd9dc579da0c9a68
+
+jobs:
+  # ---------------------------------------------------------------- correction
+  contracts:
+    name: forge test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }   # le jeton ne doit pas rester dans .git/config
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+      - run: npm ci --no-audit --fund=false
+      # RealProof.t.sol dépend d'une fixture de preuve réseau : hors CI, comme en local.
+      - run: forge test --no-match-path 'test/RealProof.t.sol' -vv
+
+  # ---------------------------------------------------------------- secrets (BLOQUANT)
+  # Baseline mesuré le 08/09/2026 : 0 fuite sur 34 commits. Bloquant dès maintenant
+  # parce que bloquer sur zéro ne coûte rien. Un secret vérifié ne se met JAMAIS en
+  # baseline : on le révoque, l'historique le garde atteignable pour toujours.
+  secrets:
+    name: secrets (bloquant)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0            # historique complet, sinon le scan ne voit que le dernier commit
+          persist-credentials: false
+      - run: docker run --rm -v "$PWD:/repo" "$GITLEAKS" detect --source=/repo --no-banner --redact -v
+
+  # ---------------------------------------------------------------- SAST
+  # Bloquant sur ERROR uniquement (baseline : 0). WARNING/INFO remontent en log et
+  # partent au backlog — 4 constats au 08/09/2026, tous de faible portée.
+  sast:
+    name: semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }   # le jeton ne doit pas rester dans .git/config
+      - name: scan
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP" \
+            semgrep --config=auto --metrics=off --json --quiet \
+            --exclude node_modules --exclude out --exclude cache --exclude web/dist \
+            > semgrep.json
+          echo "--- constats non bloquants ---"
+          jq -r '.results[] | "\(.extra.severity)\t\(.path):\(.start.line)\t\(.check_id)"' semgrep.json
+          n=$(jq '[.results[] | select(.extra.severity=="ERROR")] | length' semgrep.json)
+          echo "ERROR: $n"
+          [ "$n" -eq 0 ] || { echo "::error::$n constat(s) SAST de sévérité ERROR"; exit 1; }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with: { name: semgrep, path: semgrep.json }
+
+  # ---------------------------------------------------------------- image (BLOQUANT)
+  # --ignore-unfixed : une CVE sans correctif est une décision d'acceptation de risque,
+  # pas un blocage de merge. Baseline au 08/09/2026 : 0 après retrait de npm de l'image.
+  image:
+    name: image (bloquant)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }   # le jeton ne doit pas rester dans .git/config
+      - run: docker build -t paygo-worker:ci .
+      - name: trivy
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY" \
+            image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+            --exit-code 1 --quiet paygo-worker:ci
+
+  # ---------------------------------------------------------------- la pipeline elle-même
+  # CI est la cible la plus rentable de l'organisation : elle porte les clés. zizmor
+  # détecte injection de template, actions non pinnées, jetons trop larges.
+  workflows:
+    name: zizmor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }   # le jeton ne doit pas rester dans .git/config
+      - run: docker run --rm -v "$PWD:/repo" "$ZIZMOR" --persona=regular /repo/.github/workflows
+
+  # ---------------------------------------------------------------- CD
+  # Il n'y a PAS de job de deploiement ici, volontairement. Le serveur tire lui-meme
+  # (script/cd.sh + timer systemd) avec sa propre cle GitHub, et ne deploie un commit
+  # que si TOUS les check-runs ci-dessus sont verts. Consequence : aucune cle privee,
+  # aucun secret de production n'est depose chez GitHub, et la CI n'a aucun acces
+  # entrant au serveur. La barriere reste la meme : un commit rouge ne part jamais.
