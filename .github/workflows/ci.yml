@@ -61,7 +61,7 @@ jobs:
       - name: scan
         run: |
           docker run --rm -v "$PWD:/src" -w /src "$SEMGREP" \
-            semgrep --config=auto --metrics=off --json --quiet \
+            semgrep --config=p/default --config=p/security-audit --metrics=off --json --quiet \
             --exclude node_modules --exclude out --exclude cache --exclude web/dist \
             > semgrep.json
           echo "--- constats non bloquants ---"
