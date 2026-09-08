@@ -221,4 +221,21 @@ td.num{text-align:right}
   .kpi{padding:12px 13px}.kpi .v{font-size:19px}
   .sched-tip{white-space:normal;max-width:60vw;text-align:center}
   .btn-row button,.row-add button{flex:1 1 auto}
+
+  /* Dock en barre flottante au pied de l'écran, au-dessus du contenu. Il sort du flux
+     (position:fixed), donc .app doit réserver la hauteur en bas sans quoi le dernier
+     élément passe dessous. .hid est posée par Dock.tsx selon le sens du défilement. */
+  .dock-col{position:fixed;left:0;right:0;bottom:0;z-index:40;margin:0;
+    padding:0 12px calc(10px + env(safe-area-inset-bottom));
+    pointer-events:none;transition:transform .28s var(--ease),opacity .22s}
+  .dock-col.hid{transform:translateY(150%);opacity:0}
+  /* 55% de blanc suffit sur le bureau, où le dock flotte au-dessus d'un fond uni. Posé sur
+     du contenu dense, le texte transparaissait au travers : on remonte l'opacité. */
+  .dock{pointer-events:auto;width:auto;margin:0;padding:7px 6px;border-radius:22px;
+    background:rgba(255,255,255,.93);border-color:rgba(11,11,15,.08);
+    justify-content:space-around;box-shadow:0 -8px 30px rgba(0,0,0,.13),inset 0 1px 0 rgba(255,255,255,.85)}
+  .dock-btn{flex:1 1 0;width:auto;max-width:120px;padding:7px 4px}
+  /* le survol reste collé après un appui tactile : on le neutralise ici */
+  .dock-btn:hover,.dock-btn:has(+ .dock-btn:hover),.dock-btn:hover + .dock-btn{transform:none;box-shadow:none}
+  .app{padding-bottom:92px}
 }
