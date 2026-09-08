@@ -205,3 +205,21 @@ footer{padding:56px 0 46px}
 .stagger.in>*:nth-child(2){transition-delay:.09s}.stagger.in>*:nth-child(3){transition-delay:.18s}
 .stagger.in>*:nth-child(4){transition-delay:.27s}.stagger.in>*:nth-child(5){transition-delay:.36s}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.001ms!important}.reveal,.stagger>*,.row{opacity:1!important;transform:none!important;filter:none!important}}
+
+/* --- téléphones (<=560px). La typo est déjà en clamp() mais les minimums sont calibrés
+   pour une tablette : h1 à 42px et stats sur deux colonnes laissent ~115px de contenu
+   utile par carte sur un écran de 390. --- */
+@media(max-width:560px){
+  .hero-in{padding:28px 20px 176px}
+  .hero h1{font-size:clamp(32px,8.6vw,44px);max-width:none}
+  .hero-sub{font-size:15px;margin:20px 0 26px}
+  .hero-cta{display:flex;flex-wrap:wrap;gap:10px}
+  .hero-cta .btn{width:100%;justify-content:center}
+  .sec-h{font-size:clamp(26px,7.4vw,34px)}
+  .lead{font-size:clamp(18px,5vw,22px)}
+  .stats{grid-template-columns:1fr}             /* deux colonnes étranglaient les chiffres */
+  .stat{padding:20px}.stat .n{font-size:30px}
+  .card{padding:22px;min-height:180px}
+  .uc-big{min-height:300px}
+  section{padding:56px 0}
+}

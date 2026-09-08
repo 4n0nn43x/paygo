@@ -203,3 +203,22 @@ td.num{text-align:right}
 .asset-preview-desc{color:var(--ink-70);font-size:12.5px;margin-top:2px}
 
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.001ms!important}}
+
+/* --- téléphones (<=560px). En dessous de 600 rien n'était réglé : la tagline du bandeau
+   (42ch ≈ 380px) débordait d'un écran de 390, les adresses restaient sur deux colonnes,
+   la vignette gardait ses 132px fixes et les paires de champs ne dégradaient pas. --- */
+@media(max-width:560px){
+  header{margin-top:12px;padding:0 12px}
+  .nav{gap:10px;padding:8px 10px 8px 14px}
+  .tagline{display:none}                        /* la landing masque déjà .nav-links de la même façon */
+  .brand{font-size:18px}
+  .app{padding:12px 12px 40px;gap:14px}
+  .order-input{width:56px;font-size:16px}
+  .thumb{width:96px}
+  .parties{grid-template-columns:1fr}           /* adresses en mono : une seule colonne */
+  .row-2,.form-2{grid-template-columns:1fr}
+  .card{padding:16px 14px}
+  .kpi{padding:12px 13px}.kpi .v{font-size:19px}
+  .sched-tip{white-space:normal;max-width:60vw;text-align:center}
+  .btn-row button,.row-add button{flex:1 1 auto}
+}
