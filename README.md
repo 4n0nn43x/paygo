@@ -16,14 +16,36 @@ Assets escrow on Creditcoin · installments settle in ERC-20 on Ethereum · a pa
 PayGo is a hire-purchase protocol: a seller escrows an asset and releases it to a buyer over a
 fixed installment schedule, with no custodian, no price oracle and no liquidator. The escrow lives
 on Creditcoin, the installments are paid in ERC-20 on Ethereum, and an installment only counts once
-its Ethereum transaction has been proven to the escrow by an Attestcoin inclusion proof.
+its Ethereum transaction has been proven to the escrow by the Attestcoin Protocol.
+
+## Attestcoin Protocol integration
+
+The Attestcoin Protocol is the only thing PayGo trusts. There is no oracle, no admin key and no
+trusted relayer: an order advances only when an Ethereum transaction is proven to the escrow through
+the protocol's precompiles, in the same Creditcoin transaction that applies the business logic. Every
+capability below runs against the live CC3 testnet, not against a mock.
+
+| Attestcoin Protocol capability | Where PayGo uses it | Verifiable by |
+|---|---|---|
+| `verifyAndEmit` on the BlockProver precompile `0x…0FD2` | `PayGoEscrow._verifyBatch`, before any state change | [settle, 1 proof](https://explorer.cc3-testnet.creditcoin.network/tx/0x818e27e885c5c8ceb754231548728e7157f7043d82a99300bf7674fd66d92469) |
+| Batch verification: up to 10 queries under one shared continuity proof | `settle` and `settleCustody` take 1..10 proofs | [settle, 4 proofs](https://explorer.cc3-testnet.creditcoin.network/tx/0x2c0ddd628c85a57555c35e3095f1664a3aec6a574c68fa4a89a6596e0685c4ef), 159 912 gas per installment |
+| Latest attested source height from the ChainInfo precompile `0x…0fD3` | `declareDefault`, as the protocol's clock: this is what makes asserting a default permissionless and oracle-free | [`PayGoEscrow.sol`](contracts/PayGoEscrow.sol) |
+| `EvmV1Decoder`, the protocol's receipt and log decoding library | `PayGoEscrow._apply` and `_applyCustody`, linked at deploy time | [`script/deploy.sh`](script/deploy.sh) |
+| Attestcoin SDK `@gluwa/usc-sdk@0.18.0`: `waitUntilHeightAttested`, `getBatchProof` | [`worker/settle.ts`](worker/settle.ts), the optional relayer | [`package.json`](package.json) |
+| Source chain key 1, Sepolia on CC3 testnet, fixed at construction | escrow constructor, never a user parameter | [escrow](https://explorer.cc3-testnet.creditcoin.network/address/0x2D386703638C4f326f2CF27245F452E93585Ad8a) |
+
+The protocol proves that a transaction was included; it does not interpret what was included. Turning
+a valid proof into a valid payment takes five further checks, each written because of a property of
+the precompile verified empirically: see [the five checks](#the-five-checks), and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for why each one exists. Setup, deployment and the
+proof pipeline are in [Local development](#local-development).
 
 ## Key properties
 
 - **No price oracle.** A fixed schedule has no health factor. The asset is the collateral and its
   market price is never read, so there is nothing to manipulate and nothing to keep online.
 - **No keeper, no liquidator.** The unhappy path costs nobody any gas until someone actually wants
-  the asset back. Every entry point is permissionless — buyer, seller and third parties call the
+  the asset back. Every entry point is permissionless: buyer, seller and third parties call the
   same functions.
 - **Default is the default state.** An inclusion proof can attest that something happened; nothing
   can prove that it did not. So the protocol never tries to prove a missed payment: an overdue order
@@ -56,9 +78,9 @@ sequenceDiagram
     Note over E: last installment → Completed → buyer pulls the asset<br/>silence past grace → anyone asserts default
 ```
 
-Deadlines are quantised on `EPOCH = 1000` blocks, which is the precompile's `MAX_BATCH_RANGE`, so
-payments belonging to *different* orders fall in the same window and settle together: `settle` takes
-1..10 proofs sharing a single continuity proof.
+Deadlines are quantised on `EPOCH = 1000` blocks, the spacing of the protocol's continuity
+checkpoints, so payments belonging to *different* orders fall in the same window and settle
+together: `settle` takes the 10 proofs the protocol allows under one shared continuity proof.
 
 ### Order lifecycle
 
@@ -72,7 +94,7 @@ DefaultAsserted ──cure window elapsed──▶ Defaulted ──▶ withdrawA
 
 `declareDefault` is permissionless and oracle-free: it compares the order's deadline against the
 latest attested Ethereum height reported by the ChainInfo precompile. Asset transfers are pulled by
-their recipient, never pushed inside `settle` — a hostile or buggy ERC-721 can then only break its
+their recipient, never pushed inside `settle`, so a hostile or buggy ERC-721 can then only break its
 own claim, not a shared settlement batch.
 
 ### The five checks
@@ -82,9 +104,9 @@ empirically against the precompile, noted alongside.
 
 | # | Check | Why |
 |---|---|---|
-| 1 | Nullifier `keccak(chainKey‖height‖txIndex)`, marked before anything else | the precompile has no replay protection — the same proof verifies twice |
+| 1 | Nullifier `keccak(chainKey‖height‖txIndex)`, marked before anything else | the precompile has no replay protection: the same proof verifies twice |
 | 2 | `verifyAndEmit` over the whole batch | reverts on an invalid proof; it never returns false |
-| 3 | `receiptStatus == 1` | the precompile does not check it — a failed transaction is perfectly provable |
+| 3 | `receiptStatus == 1` | the precompile does not check it: a failed transaction is perfectly provable |
 | 4 | `log.address_ == ROUTER` and `topics[1] == address(this)` | log lookup filters on the event signature alone, so any contract can emit `InstallmentPaid` |
 | 5 | Order open, installment unpaid, payee/token match, `amount ≥ due`, `height ≤ deadline` | business validity |
 
@@ -99,7 +121,7 @@ behind a tokenised asset is the one that was listed. PayGo binds an EIP-5791 chi
 seller's chip signs at listing (Origin), the buyer's scan signs at delivery, and both attestations
 reach the escrow through the same proof pipeline as payments.
 
-A match is positive evidence — only the genuine chip can produce it — and releases the seller's
+A match is positive evidence (only the genuine chip can produce it) and releases the seller's
 custody bond. A mismatch is deliberately *not* its mirror image: anyone can generate a keypair, so a
 mismatch proves only that some other key signed. It therefore pays nobody and the bond is burned.
 Paying the buyer would put a bounty on lying.
@@ -112,15 +134,15 @@ payment side avoids.
 
 | Path | Chain | Contents |
 |---|---|---|
-| `contracts/PayGoRouter.sol` | Ethereum | stateless payment entry points — `payInstallment`, `payWithPermit` (EIP-2612), `payWithAuthorization` (EIP-3009); emits `InstallmentPaid` |
-| `contracts/CustodyRouter.sol` | Ethereum | stateless chip attestation — `attestPossession`; emits `PossessionAttested` |
+| `contracts/PayGoRouter.sol` | Ethereum | stateless payment entry points: `payInstallment`, `payWithPermit` (EIP-2612), `payWithAuthorization` (EIP-3009); emits `InstallmentPaid` |
+| `contracts/CustodyRouter.sol` | Ethereum | stateless chip attestation: `attestPossession`; emits `PossessionAttested` |
 | `contracts/PayGoEscrow.sol` | Creditcoin | orders, `settle` / `settleCustody`, default state machine, pull-based asset and bond release |
 | `contracts/CreditPassport.sol` | Creditcoin | ERC-5192 soulbound record of payment facts, read back by `createOrder` |
 | `contracts/SellerPassport.sol` | Creditcoin | ERC-5192 soulbound record of custody facts; gates the bond requirement |
-| `contracts/Attestcoin.sol` | — | precompile interfaces: `0x…0FD2` BlockProver, `0x…0fD3` ChainInfo |
-| `worker/settle.ts` | — | optional relayer: submits pre-signed authorizations, batches proofs, calls `settle`; serves the web client |
-| `web/app/` | — | Vite + React client: listing, checkout, live schedule, passport |
-| `docs/` | — | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`AUDIT.md`](docs/AUDIT.md) |
+| `contracts/Attestcoin.sol` | Creditcoin | precompile interfaces: `0x…0FD2` BlockProver, `0x…0fD3` ChainInfo |
+| `worker/settle.ts` | off-chain | optional relayer: submits pre-signed authorizations, batches proofs, calls `settle`; serves the web client |
+| `web/app/` | off-chain | Vite + React client: listing, checkout, live schedule, passport |
+| `docs/` | off-chain | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`AUDIT.md`](docs/AUDIT.md) |
 
 The relayer is a convenience, not a trust assumption. `settle` and `settleCustody` are
 permissionless: a buyer who does not trust it can submit the identical proof themselves.
@@ -139,7 +161,7 @@ permissionless: a buyer who does not trust it can submit the identical proof the
 | DemoAsset (ERC-721, test fixture) | [`0x205E75Bd48FB37B0489968D9A762b5D585a5ba77`](https://explorer.cc3-testnet.creditcoin.network/address/0x205E75Bd48FB37B0489968D9A762b5D585a5ba77) |
 
 Both passports are deployed by the escrow's constructor. Escrow parameters: `chainKey = 1`
-(Attestcoin's key for Sepolia on CC3 — not the EVM chain id), `GRACE = 2000` Ethereum blocks,
+(Attestcoin's key for Sepolia on CC3, not the EVM chain id), `GRACE = 2000` Ethereum blocks,
 `CURE_WINDOW = 240` and `CUSTODY_WINDOW = 240` Creditcoin blocks.
 
 ### Sepolia
@@ -165,7 +187,7 @@ npm run build:web     # web/app → web/dist
 ```
 
 Solidity 0.8.30, optimizer on at 200 runs, `evm_version = "shanghai"`. `EvmV1Decoder` is an external
-library and must be linked at deploy time — see `script/deploy.sh`.
+library and must be linked at deploy time, see `script/deploy.sh`.
 
 Running against testnet:
 
@@ -186,7 +208,7 @@ No third-party audit. What has been done instead:
 
 | Review | Scope | Outcome |
 |---|---|---|
-| Internal pre-deployment review | contracts | 1 high, 2 medium, 2 low — fixed or documented as accepted |
+| Internal pre-deployment review | contracts | 1 high, 2 medium, 2 low; all fixed or documented as accepted |
 | Automated multi-agent review, 2026-08-31 | contracts + relayer | 3 findings survived refutation with executed proofs of concept; 1 candidate refuted |
 | Automated multi-agent review, 2026-09-03 | full surface | 7 findings (1 critical, 3 high, 2 medium, 1 low), all fixed |
 | Web client review | client + relayer HTTP surface | 4 findings, all fixed |
@@ -200,7 +222,7 @@ Two residual risks are accepted by design and worth stating plainly:
 
 - **Passport collusion.** Two cooperating wallets can manufacture payment history by completing real
   orders between themselves. Permissionless reputation without identity cannot prevent this. The
-  passport is a deposit discount, never a security boundary — the asset stays escrowed and reverts
+  passport is a deposit discount, never a security boundary: the asset stays escrowed and reverts
   to the seller on default whatever the buyer's record says.
 - **Self-forged custody.** A seller can attest both Origin and Delivery on a sham order using a
   throwaway chip. Proof-of-Custody detects substitution between listing and delivery; it does not
@@ -233,8 +255,13 @@ Proof freshness, measured at the precompile with `node script/gas-probe.mjs` aga
 | +24 h | 62 | 84 284 |
 | +7 d | 62 | 86 127 |
 
-An aged proof costs roughly twice a fresh one — the prover anchors on the nearest checkpoint, about
-60 roots — and stays flat beyond that. Batching is the larger lever; freshness is the second.
+An aged proof costs roughly twice a fresh one (the prover anchors on the nearest checkpoint, about
+60 roots) and stays flat beyond that. Batching is the larger lever; freshness is the second.
+
+The protocol's own documentation estimates more than a tenfold increase over 24 hours. Measured
+against the deployed precompile it is closer to twofold, because the anchor lands about 60 roots
+away rather than a thousand. The estimate is published, the measurement is reproducible: run
+`node script/gas-probe.mjs`.
 
 ## License
 
