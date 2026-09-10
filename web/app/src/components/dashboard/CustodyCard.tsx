@@ -11,7 +11,7 @@ const ZERO = '0x0000000000000000000000000000000000000000';
 // The chip is a standalone keypair, never the connected wallet: it signs a raw digest
 // locally (matches CustodyRouter's ECDSA.recover with no message prefix), then anyone submits it.
 export function CustodyCard({ cfg, ccRead, log, orderId, reload }: {
-  cfg: Cfg; ccRead: JsonRpcProvider; log: (m: string, c?: string) => void; orderId: string; reload: () => void;
+  cfg: Cfg; ccRead: JsonRpcProvider; log: (m: string, c?: string) => void; orderId: string | null; reload: () => void;
 }) {
   const [chipKey, setChipKey] = useState('');
   const [out, setOut] = useState<React.ReactNode>(null);
@@ -69,6 +69,7 @@ export function CustodyCard({ cfg, ccRead, log, orderId, reload }: {
   return (
     <div>
       <div className="desc">A chip inside the item signs at listing, and again at handoff.</div>
+      {!id && <div className="empty-t">Open one of your orders first: a chip is bound to an order.</div>}
       <div className="form-2">
         <fieldset>
           <legend><Cpu aria-hidden="true" />The chip</legend>
@@ -77,16 +78,16 @@ export function CustodyCard({ cfg, ccRead, log, orderId, reload }: {
           <button className="sec" onClick={genChip}>Generate a chip</button>
         </fieldset>
         <fieldset>
-          <legend>Scan for order {id}</legend>
+          <legend>Scan for order {id ? `#${id}` : 'none'}</legend>
           <div className="btn-col">
-            <button onClick={() => attestCustody(0)}><PackageOpen aria-hidden="true" />Origin <span className="hint">seller, at listing</span></button>
-            <button onClick={() => attestCustody(1)}><Truck aria-hidden="true" />Delivery <span className="hint">buyer, at handoff</span></button>
+            <button disabled={!id} onClick={() => attestCustody(0)}><PackageOpen aria-hidden="true" />Origin <span className="hint">seller, at listing</span></button>
+            <button disabled={!id} onClick={() => attestCustody(1)}><Truck aria-hidden="true" />Delivery <span className="hint">buyer, at handoff</span></button>
           </div>
         </fieldset>
       </div>
       <div className="btn-row">
-        <button className="sec" onClick={checkBond}>Check bond</button>
-        <button className="sec" onClick={() => esc('withdrawBond', 'bond resolved')}>Resolve bond</button>
+        <button className="sec" disabled={!id} onClick={checkBond}>Check bond</button>
+        <button className="sec" disabled={!id} onClick={() => esc('withdrawBond', 'bond resolved')}>Resolve bond</button>
         <button className="sec" onClick={() => esc('claimBond', 'bond claimed')}>Claim my bond</button>
       </div>
       <div className="out mono">{out}</div>

@@ -44,8 +44,21 @@ header{max-width:1280px;margin:20px auto 0;padding:0 24px}
 .card.order{margin-bottom:18px}
 .page-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .page-h h1{font-size:22px;display:flex;align-items:center;gap:10px}
-.order-input{width:64px;padding:4px 10px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:17px;font-weight:600;color:var(--ink);text-align:center}
-.order-input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 3px rgba(233,162,26,.2)}
+.order-no{font-weight:600}
+.order-list{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.order-row{display:flex;align-items:center;gap:14px;width:100%;margin:0;padding:10px 12px;font:inherit;text-align:left;
+  border-radius:14px;border:1px solid var(--line);background:rgba(11,11,15,.02);color:var(--ink);box-shadow:none;
+  transition:background .2s,border-color .2s,box-shadow .2s}
+.order-row:hover{background:#fff;border-color:var(--gold);box-shadow:0 6px 20px rgba(0,0,0,.05)}
+.order-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.order-row-top{display:flex;align-items:center;gap:8px;min-width:0}
+.order-row-top b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.order-row .mut{font-size:12px}
+.order-row>svg.lucide{color:var(--ink-40)}
+.thumb.sm{width:44px;border-radius:10px}
+.thumb.sm svg{width:18px;height:18px}
+.lookup{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.lookup label{margin-top:0}
 .icon-btn{margin:0;padding:8px;border-radius:10px;background:transparent;border:1px solid var(--line);color:var(--ink-55);box-shadow:none}
 .icon-btn:hover{background:#fff;color:var(--ink);transform:none;box-shadow:none}
 .page-actions{margin-left:auto}
@@ -213,7 +226,6 @@ td.num{text-align:right}
   .tagline{display:none}                        /* la landing masque déjà .nav-links de la même façon */
   .brand{font-size:18px}
   .app{padding:12px 12px 40px;gap:14px}
-  .order-input{width:56px;font-size:16px}
   .thumb{width:96px}
   .parties{grid-template-columns:minmax(0,1fr)}           /* adresses en mono : une seule colonne */
   .row-2,.form-2{grid-template-columns:minmax(0,1fr)}

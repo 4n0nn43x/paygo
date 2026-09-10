@@ -1,5 +1,5 @@
 import { Contract } from 'ethers';
-import { RefreshCw, AlertTriangle, Gavel, PackageCheck, Undo2, ImageOff, Lock, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Gavel, PackageCheck, Undo2, ImageOff, Lock, ShieldCheck, ShieldAlert, ArrowLeft } from 'lucide-react';
 import { ESCROW_ABI, STATUS } from '../../lib/abis';
 import { net, CC, errMsg } from '../../lib/chain';
 import { fmt } from '../../lib/format';
@@ -12,8 +12,8 @@ const ZERO = '0x0000000000000000000000000000000000000000';
 const short = (a: string) => a.slice(0, 6) + '…' + a.slice(-4);
 
 /** The order, in one card: what is being bought, by whom, its verdict, the one action its state allows, and the four numbers. */
-export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
-  cfg: { escrow: string }; state: OrderState; orderId: string; setOrderId: (id: string) => void;
+export function OrderCard({ cfg, state, orderId, onBack, reload, log }: {
+  cfg: { escrow: string }; state: OrderState; orderId: string; onBack: () => void;
   reload: () => void; log: (m: string, c?: string) => void;
 }) {
   const o = state.kind === 'ok' ? state.order : null;
@@ -42,7 +42,8 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
   return (
     <section className="card order">
       <div className="page-h">
-        <h1>Order <input className="order-input mono" value={orderId} onChange={e => setOrderId(e.target.value)} aria-label="Order id" /></h1>
+        <button className="icon-btn" onClick={onBack} aria-label="Back to your orders" title="Back to your orders"><ArrowLeft aria-hidden="true" /></button>
+        <h1>Order <span className="order-no mono">#{orderId}</span></h1>
         {o && <span className={`pill ${CLS[o.status]}`}>{LABEL[STATUS[o.status]]}</span>}
         {state.kind === 'loading' && <span className="pill">loading</span>}
         {state.kind === 'error' && <span className="pill bad">{state.message}</span>}
@@ -52,8 +53,8 @@ export function OrderCard({ cfg, state, orderId, setOrderId, reload, log }: {
 
       {!o ? (
         <div className="empty-t">
-          {state.kind === 'missing' ? `Nothing at #${orderId} yet. Try another number, or put something up for sale: the order opens here.`
-            : state.kind === 'loading' ? 'Reading it from Creditcoin…' : 'Pick an order number, or put something up for sale with the Sell panel.'}
+          {state.kind === 'missing' ? `Nothing at #${orderId} yet. Go back to your orders, or put something up for sale: the order opens here.`
+            : state.kind === 'loading' ? 'Reading it from Creditcoin…' : 'Go back to your orders, or put something up for sale with the Sell panel.'}
         </div>
       ) : (
         <div className="order-body">

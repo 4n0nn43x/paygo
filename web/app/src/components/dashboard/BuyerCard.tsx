@@ -81,7 +81,7 @@ export function BuyerCard({ cfg, me, log, order, reload }: {
   return (
     <div>
       <div className="desc">Two steps, on Ethereum. Pay the deposit in one click, then sign once for the rest: the relayer submits each installment when it is due.</div>
-      {!order && <div className="empty-t">Pick an order first, at the top of the page.</div>}
+      {!order && <div className="empty-t">Open one of your orders first. They are listed at the top of the page.</div>}
       {order && !me && <div className="empty-t">Connect a wallet to pay.</div>}
       <div className="steps">
         <div className="step">
