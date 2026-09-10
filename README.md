@@ -38,7 +38,7 @@ The protocol proves that a transaction was included; it does not interpret what 
 a valid proof into a valid payment takes five further checks, each written because of a property of
 the precompile verified empirically: see [the five checks](#the-five-checks), and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for why each one exists. Setup, deployment and the
-proof pipeline are in [Local development](#local-development).
+proof pipeline step by step are in [`docs/BUILD.md`](docs/BUILD.md).
 
 ## Key properties
 
@@ -142,7 +142,7 @@ payment side avoids.
 | `contracts/Attestcoin.sol` | Creditcoin | precompile interfaces: `0x…0FD2` BlockProver, `0x…0fD3` ChainInfo |
 | `worker/settle.ts` | off-chain | optional relayer: submits pre-signed authorizations, batches proofs, calls `settle`; serves the web client |
 | `web/app/` | off-chain | Vite + React client: listing, checkout, live schedule, passport |
-| `docs/` | off-chain | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`AUDIT.md`](docs/AUDIT.md) |
+| `docs/` | off-chain | [`BUILD.md`](docs/BUILD.md) setup and proof pipeline, [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) design rationale, [`AUDIT.md`](docs/AUDIT.md) security reviews |
 
 The relayer is a convenience, not a trust assumption. `settle` and `settleCustody` are
 permissionless: a buyer who does not trust it can submit the identical proof themselves.
