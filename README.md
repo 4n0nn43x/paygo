@@ -258,10 +258,8 @@ Proof freshness, measured at the precompile with `node script/gas-probe.mjs` aga
 An aged proof costs roughly twice a fresh one (the prover anchors on the nearest checkpoint, about
 60 roots) and stays flat beyond that. Batching is the larger lever; freshness is the second.
 
-The protocol's own documentation estimates more than a tenfold increase over 24 hours. Measured
-against the deployed precompile it is closer to twofold, because the anchor lands about 60 roots
-away rather than a thousand. The estimate is published, the measurement is reproducible: run
-`node script/gas-probe.mjs`.
+Every figure here is reproducible: `node script/gas-probe.mjs` re-runs the freshness probe against the
+deployed precompile.
 
 ## License
 
