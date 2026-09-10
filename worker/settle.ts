@@ -165,6 +165,7 @@ const MIME: Record<string, string> = {
   '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.json': 'application/json',
+  '.pdf': 'application/pdf',
 };
 function mimeType(file: string) { return MIME[extname(file)] ?? 'application/octet-stream'; }
 
@@ -241,7 +242,12 @@ createServer((req, res) => {
     const csp = "default-src 'none'; script-src 'self'; connect-src 'self' " + env('SOURCE_CHAIN_RPC_URL') + ' ' + env('CREDITCOIN_RPC_URL') + "; img-src 'self' data: https:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com";
     const file = staticFilePath(req.url ?? '/');
     if (file) {
-      res.writeHead(200, { 'content-type': mimeType(file), 'x-content-type-options': 'nosniff', 'content-security-policy': csp });
+      // The CSP is a policy for an HTML document and does nothing for the other assets. On a PDF it is
+      // actively harmful: object-src falls back to default-src 'none', which can stop the browser's own
+      // viewer from displaying the file inline and turns a link into a download.
+      const headers: Record<string, string> = { 'content-type': mimeType(file), 'x-content-type-options': 'nosniff' };
+      if (extname(file) === '.html') headers['content-security-policy'] = csp;
+      res.writeHead(200, headers);
       return res.end(readFileSync(file));
     }
   }
