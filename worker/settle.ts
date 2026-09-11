@@ -74,7 +74,12 @@ const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 async function autopay() {
   const now = Math.floor(Date.now() / 1000);
   for (const a of state.autopay) {
-    if (a.txHash || a.error || a.validAfter >= now) continue;
+    // "not yet valid" was this clock running ahead of the block timestamp, never a verdict on the
+    // authorization. Entries an older worker buried under it are retryable.
+    if (a.error?.includes('not yet valid')) delete a.error;
+    // The token checks block.timestamp > validAfter; wall clock and block time disagree by up to a
+    // block, so wait a margin past validAfter instead of racing the next block.
+    if (a.txHash || a.error || a.validAfter + 30 > now) continue;
     if (a.validBefore <= now) { a.error = 'expired'; save(); continue; }
     try {
       // An EIP-3009 authorization has no idea the order it was signed for is over: the token would happily
@@ -88,7 +93,11 @@ async function autopay() {
       a.txHash = tx.hash; save();
       console.log(`autopay order ${a.orderId} #${a.installmentNo} → ${tx.hash}`);
       await tx.wait();
-    } catch (e: any) { a.error = e.shortMessage ?? e.message; save(); console.error('autopay failed:', a.error); }
+    } catch (e: any) {
+      const msg = e.shortMessage ?? e.message;
+      if (msg.includes('not yet valid')) { console.warn(`autopay #${a.installmentNo}: not valid on chain yet, retrying next tick`); continue; }
+      a.error = msg; save(); console.error('autopay failed:', a.error);
+    }
   }
 }
 
